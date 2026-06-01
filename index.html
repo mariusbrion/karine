@@ -4,7 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>La boîte à outils de Karine</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/2.3.0/flowbite.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,11 +18,8 @@
       min-height: 100vh;
     }
 
-    .title-font {
-      font-family: 'DM Serif Display', serif;
-    }
+    .title-font { font-family: 'DM Serif Display', serif; }
 
-    /* Subtle grain texture overlay */
     body::before {
       content: '';
       position: fixed;
@@ -34,11 +30,28 @@
       opacity: 0.4;
     }
 
+    /* ── Grid layout ── */
+    .tools-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto;
+      gap: 16px;
+      transition: grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1),
+                  grid-template-rows    0.45s cubic-bezier(0.4,0,0.2,1);
+    }
+
+    /* When slot-1 is expanded: take full width, push others below */
+    .tools-grid.expanded-1 {
+      grid-template-columns: 1fr;
+    }
+
+    /* ── Cards ── */
     .slot-card {
       background: #ffffff;
       border: 1px solid #E8E8E5;
       border-radius: 16px;
-      transition: box-shadow 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
+      transition: box-shadow 0.25s ease, transform 0.25s ease,
+                  border-color 0.25s ease, min-height 0.45s cubic-bezier(0.4,0,0.2,1);
       position: relative;
       overflow: hidden;
       min-height: 200px;
@@ -56,6 +69,29 @@
       border-color: #D0D0CC;
     }
 
+    /* Expanded state for slot-1 */
+    #slot1.expanded {
+      min-height: 480px;
+      cursor: default;
+      transform: none;
+      box-shadow: 0 12px 48px rgba(0,0,0,0.09);
+      border-color: #D8D8D4;
+      align-items: stretch;
+      justify-content: flex-start;
+      padding: 0;
+    }
+
+    #slot1.expanded:hover {
+      transform: none;
+    }
+
+    /* Hidden slots when slot-1 is expanded */
+    .tools-grid.expanded-1 #slot2,
+    .tools-grid.expanded-1 #slot3,
+    .tools-grid.expanded-1 #slot4 {
+      display: none;
+    }
+
     .slot-card::after {
       content: '';
       position: absolute;
@@ -65,28 +101,81 @@
     }
 
     .slot-icon {
-      width: 40px;
-      height: 40px;
-      border-radius: 10px;
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
       background: #F2F2EF;
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: background 0.2s ease;
+      font-size: 1.25rem;
+      transition: background 0.2s ease, transform 0.2s ease;
     }
 
-    .slot-card:hover .slot-icon {
-      background: #EAEAE6;
-    }
+    .slot-card:hover .slot-icon { background: #EAEAE6; transform: scale(1.05); }
 
     .slot-label {
       font-size: 0.8125rem;
       font-weight: 400;
-      color: #B0B0A8;
-      letter-spacing: 0.02em;
+      color: #888882;
+      letter-spacing: 0.01em;
+      text-align: center;
+      padding: 0 16px;
     }
 
-    /* Page load animation */
+    /* ── Upload panel (inside expanded slot-1) ── */
+    #upload-panel {
+      display: none;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      transition: opacity 0.3s ease 0.2s;
+    }
+
+    #upload-panel.visible {
+      display: flex;
+      opacity: 1;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid #F0F0EC;
+    }
+
+    .panel-title {
+      font-family: 'DM Serif Display', serif;
+      font-size: 1.125rem;
+      color: #1a1a1a;
+    }
+
+    .close-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: #F4F4F1;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+      position: relative;
+      z-index: 10;
+    }
+
+    .close-btn:hover { background: #EAEAE6; }
+
+    #upload-content {
+      flex: 1;
+      padding: 24px;
+      overflow-y: auto;
+    }
+
+    /* ── Animations ── */
     @keyframes fadeUp {
       from { opacity: 0; transform: translateY(16px); }
       to   { opacity: 1; transform: translateY(0); }
@@ -98,19 +187,21 @@
     .anim-4 { animation: fadeUp 0.55s 0.22s ease both; }
     .anim-5 { animation: fadeUp 0.55s 0.30s ease both; }
 
-    .divider {
-      width: 32px;
-      height: 1px;
-      background: #E0E0DC;
-      margin: 0 auto;
-    }
-
+    .divider { width: 32px; height: 1px; background: #E0E0DC; margin: 0 auto; }
     .badge {
       font-size: 0.6875rem;
       font-weight: 500;
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: #B8B8B0;
+    }
+
+    /* Default slot content wrapper */
+    .slot-default {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
     }
   </style>
 </head>
@@ -127,61 +218,131 @@
       <div class="divider mt-6"></div>
     </header>
 
-    <!-- Grid 2x2 -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <!-- Grid -->
+    <div class="tools-grid" id="toolsGrid">
 
-      <!-- Slot 1 -->
-      <div class="slot-card p-8 anim-2">
-        <div class="slot-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9E9E98" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="3"/>
-            <path d="M12 8v8M8 12h8"/>
-          </svg>
+      <!-- Slot 1 — Déposer un fichier -->
+      <div class="slot-card anim-2" id="slot1" onclick="openSlot1(event)">
+
+        <!-- Default visible content -->
+        <div class="slot-default" id="slot1-default">
+          <div class="slot-icon">📂</div>
+          <span class="slot-label">J'ai un fichier<br>à déposer</span>
         </div>
-        <span class="slot-label">Outil 1</span>
+
+        <!-- Expanded panel (injected by upload.js) -->
+        <div id="upload-panel">
+          <div class="panel-header">
+            <span class="panel-title">Déposer un fichier</span>
+            <button class="close-btn" onclick="closeSlot1(event)" title="Fermer">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round">
+                <line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/>
+              </svg>
+            </button>
+          </div>
+          <div id="upload-content"></div>
+        </div>
+
       </div>
 
       <!-- Slot 2 -->
-      <div class="slot-card p-8 anim-3">
-        <div class="slot-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9E9E98" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="3"/>
-            <path d="M12 8v8M8 12h8"/>
-          </svg>
+      <div class="slot-card anim-3" id="slot2">
+        <div class="slot-default">
+          <div class="slot-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9E9E98" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M12 8v8M8 12h8"/>
+            </svg>
+          </div>
+          <span class="slot-label">Outil 2</span>
         </div>
-        <span class="slot-label">Outil 2</span>
       </div>
 
       <!-- Slot 3 -->
-      <div class="slot-card p-8 anim-4">
-        <div class="slot-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9E9E98" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="3"/>
-            <path d="M12 8v8M8 12h8"/>
-          </svg>
+      <div class="slot-card anim-4" id="slot3">
+        <div class="slot-default">
+          <div class="slot-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9E9E98" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M12 8v8M8 12h8"/>
+            </svg>
+          </div>
+          <span class="slot-label">Outil 3</span>
         </div>
-        <span class="slot-label">Outil 3</span>
       </div>
 
       <!-- Slot 4 -->
-      <div class="slot-card p-8 anim-5">
-        <div class="slot-icon">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9E9E98" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="18" height="18" rx="3"/>
-            <path d="M12 8v8M8 12h8"/>
-          </svg>
+      <div class="slot-card anim-5" id="slot4">
+        <div class="slot-default">
+          <div class="slot-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9E9E98" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M12 8v8M8 12h8"/>
+            </svg>
+          </div>
+          <span class="slot-label">Outil 4</span>
         </div>
-        <span class="slot-label">Outil 4</span>
       </div>
 
     </div>
 
-    <!-- Footer -->
     <footer class="text-center mt-20 anim-5">
       <p class="text-xs text-gray-300 tracking-wide">✦</p>
     </footer>
 
   </div>
+
+  <script>
+    let slot1Open = false;
+
+    function openSlot1(e) {
+      if (slot1Open) return;
+      slot1Open = true;
+
+      const grid  = document.getElementById('toolsGrid');
+      const card  = document.getElementById('slot1');
+      const def   = document.getElementById('slot1-default');
+      const panel = document.getElementById('upload-panel');
+
+      // Expand card & grid
+      grid.classList.add('expanded-1');
+      card.classList.add('expanded');
+
+      // Hide default content
+      def.style.display = 'none';
+
+      // Inject upload.js if not already loaded
+      if (!document.getElementById('upload-js')) {
+        const script = document.createElement('script');
+        script.id  = 'upload-js';
+        script.src = 'outils/upload.js';
+        document.body.appendChild(script);
+      } else {
+        // Already loaded — just init
+        if (typeof initUpload === 'function') initUpload();
+      }
+
+      // Show panel with fade
+      panel.style.display = 'flex';
+      requestAnimationFrame(() => panel.classList.add('visible'));
+    }
+
+    function closeSlot1(e) {
+      e.stopPropagation();
+      slot1Open = false;
+
+      const grid  = document.getElementById('toolsGrid');
+      const card  = document.getElementById('slot1');
+      const def   = document.getElementById('slot1-default');
+      const panel = document.getElementById('upload-panel');
+
+      panel.classList.remove('visible');
+
+      setTimeout(() => {
+        panel.style.display = 'none';
+        grid.classList.remove('expanded-1');
+        card.classList.remove('expanded');
+        def.style.display = 'flex';
+      }, 320);
+    }
+  </script>
 
 </body>
 </html>
