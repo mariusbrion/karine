@@ -126,18 +126,35 @@
   };
 
   // ── ROUTAGE SUR LE NOUVEL ENDPOINT OFFICIEL DE HEIGIT ──
-  async function fetchIsochrone(lat, lng, distanceMeters, profile) {
-    const cleanLng = parseFloat(lng);
-    const cleanLat = parseFloat(lat);
-    const cleanDist = parseInt(distanceMeters);
+async function fetchIsochrone(lat, lng, distanceMeters, profile) {
+  const cleanLng = parseFloat(lng);
+  const cleanLat = parseFloat(lat);
+  const cleanDist = parseInt(distanceMeters);
 
-    // Substitution du domaine api.openrouteservice.org par api.heigit.org
-    const url = `https://api.heigit.org/v2/isochrones/${profile}?api_key=${apiKey}&locations=${cleanLng},${cleanLat}&range=${cleanDist}&range_type=distance`;
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json, application/geo+json; charset=utf-8' }
-    });
+  // ✅ Bon chemin : /openrouteservice/v2/
+  // ✅ POST + Authorization header (requis pour le CORS sur api.heigit.org)
+  const url = `https://api.heigit.org/openrouteservice/v2/isochrones/${profile}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': apiKey,
+      'Accept': 'application/json, application/geo+json; charset=utf-8'
+    },
+    body: JSON.stringify({
+      locations: [[cleanLng, cleanLat]],
+      range: [cleanDist],
+      range_type: 'distance'
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "Détails indisponibles");
+    throw new Error(`Erreur API HeiGIT (Code HTTP ${response.status}) : ${errText}`);
+  }
+  return await response.json();
+}
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "Détails indisponibles");
