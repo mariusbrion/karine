@@ -45,7 +45,6 @@
   if (!container) return;
 
   // Variables d'état globales pour l'outil
-  let csvRawData = null; 
   let csvHeaders = [];
   let csvRowsPreview = [];
   let currentFile = null;
@@ -56,7 +55,7 @@
 
   // Écran initial : Dépôt de fichier
   window.initGeocodeur = function () {
-    csvRawData = null; csvHeaders = []; csvRowsPreview = []; currentFile = null; geocodedResults = [];
+    csvHeaders = []; csvRowsPreview = []; currentFile = null; geocodedResults = [];
     if (mapInstance) { mapInstance.remove(); mapInstance = null; }
     showUploadStep();
   };
@@ -103,6 +102,7 @@
     }
     currentFile = file;
 
+    // Utilisation du mode auto-détection de PapaParse pour ingérer le fichier (virgule ou point-virgule)
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
@@ -173,56 +173,71 @@
     btn.classList.remove('opacity-50', 'cursor-not-allowed');
   };
 
-  // Traitement Batch direct vers la BAN
+  // Traitement Batch avec restructuration stricte en virgules (évite l'erreur 400)
   window.runBANGeocoding = function () {
     const selectedColumns = Array.from(document.querySelectorAll('.column-checkbox:checked')).map(cb => cb.value);
     
     container.innerHTML = `
       <div class="text-center py-12">
         <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto mb-4"></div>
-        <p class="text-sm font-medium text-gray-700">Envoi et traitement en cours sur la Base Adresse Nationale...</p>
-        <p class="text-xs text-gray-400 mt-1">Cette opération peut prendre quelques secondes selon la taille du CSV.</p>
+        <p class="text-sm font-medium text-gray-700">Traitement et conversion du fichier en cours...</p>
+        <p class="text-xs text-gray-400 mt-1">Envoi sécurisé vers la Base Adresse Nationale...</p>
       </div>
     `;
 
-    const formData = new FormData();
-    formData.append('data', currentFile);
-    selectedColumns.forEach(col => formData.append('columns', col));
+    // 1. Lire TOUT le fichier d'origine (gère le point-virgule d'Excel automatiquement)
+    Papa.parse(currentFile, {
+      header: true,
+      skipEmptyLines: true,
+      complete: function (fullResults) {
+        
+        // 2. Re-convertir le tableau d'objets en une chaîne de texte CSV avec séparateur VIRGULE strict (,)
+        const standardizedCsvText = Papa.unparse(fullResults.data, { delimiter: ',' });
+        
+        // 3. Fabriquer un fichier virtuel (Blob) propre
+        const csvBlob = new Blob([standardizedCsvText], { type: 'text/csv;charset=utf-8;' });
 
-    fetch('https://api-adresse.data.gouv.fr/search/csv/', {
-      method: 'POST',
-      body: formData
-    })
-    .then(res => {
-      if (!res.ok) throw new Error('Erreur lors du traitement par la BAN API');
-      return res.text();
-    })
-    .then(csvText => {
-      Papa.parse(csvText, {
-        header: true,
-        skipEmptyLines: true,
-        complete: function (results) {
-          geocodedResults = results.data.map(row => {
-            let score = parseFloat(row.result_score) || 0;
-            if (row.result_status === 'skipped') score = 0; 
-            return {
-              ...row,
-              _lat: parseFloat(row.latitude) || null,
-              _lng: parseFloat(row.longitude) || null,
-              _score: score
-            };
+        // 4. Préparer l'envoi à la BAN
+        const formData = new FormData();
+        formData.append('data', csvBlob, 'input_clean.csv');
+        selectedColumns.forEach(col => formData.append('columns', col));
+
+        fetch('https://api-adresse.data.gouv.fr/search/csv/', {
+          method: 'POST',
+          body: formData
+        })
+        .then(res => {
+          if (!res.ok) throw new Error(`Erreur BAN API (Statut ${res.status}). Vérifiez vos colonnes.`);
+          return res.text();
+        })
+        .then(csvText => {
+          Papa.parse(csvText, {
+            header: true,
+            skipEmptyLines: true,
+            complete: function (results) {
+              geocodedResults = results.data.map(row => {
+                let score = parseFloat(row.result_score) || 0;
+                if (row.result_status === 'skipped') score = 0; 
+                return {
+                  ...row,
+                  _lat: parseFloat(row.latitude) || null,
+                  _lng: parseFloat(row.longitude) || null,
+                  _score: score
+                };
+              });
+              showResultsDashboard();
+            }
           });
-          showResultsDashboard();
-        }
-      });
-    })
-    .catch(err => {
-      alert(err.message);
-      showMappingStep();
+        })
+        .catch(err => {
+          alert(err.message);
+          showMappingStep();
+        });
+      }
     });
   };
 
-  // Écran Principal : Dashboard de contrôle, Filtre, Notifications et Carte de correction
+  // Écran Principal : Dashboard de contrôle, Filtre, Notifications et Carte
   function showResultsDashboard() {
     container.innerHTML = `
       <div class="grid grid-cols-1 md:grid-cols-2 gap-5 h-[440px]">
@@ -268,9 +283,9 @@
 
   function initLeafletMap() {
     if (mapInstance) return;
-    mapInstance = L.map('leaflet-geo-map').setView([44.837789, -0.57918], 12); // Def: Bordeaux
+    mapInstance = L.map('leaflet-geo-map').setView([46.603354, 1.888334], 5); // Recentrage France
     L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap'
+      attribution: '© OpenStreetMap'
     }).addTo(mapInstance);
 
     mapInstance.on('click', function (e) {
@@ -283,19 +298,17 @@
         mapMarker = L.marker(e.latlng).addTo(mapInstance);
       }
 
-      // Met à jour la donnée locale en écrasant les mauvaises coordonnées
+      // Écrasement des coordonnées erronées par le point cliqué
       geocodedResults[activeFixIndex]._lat = lat;
       geocodedResults[activeFixIndex]._lng = lng;
-      geocodedResults[activeFixIndex]._score = 1.0; // Devient fiable à 100% après repointage manuel
+      geocodedResults[activeFixIndex]._score = 1.0; // Score forcé au maximum après action manuelle
       geocodedResults[activeFixIndex].latitude = lat.toString();
       geocodedResults[activeFixIndex].longitude = lng.toString();
-      geocodedResults[activeFixIndex].result_label = "Positionnée manuellement sur la carte";
+      geocodedResults[activeFixIndex].result_label = "Repositionné manuellement sur la carte";
 
-      // Sauvegarde temporaire de l'index actif
       const indexToKeep = activeFixIndex;
       window.filterGeocodeData();
       
-      // Maintient la surbrillance si la ligne est encore affichée
       const targetCard = document.getElementById(`notif_${indexToKeep}`);
       if (targetCard) {
         targetCard.classList.add('active');
@@ -326,7 +339,7 @@
       if (row._score < threshold || !row._lat || !row._lng) {
         failCount++;
         
-        // Extraction de toutes les colonnes originelles pour l'affichage complet
+        // Extraction propre de toutes les métadonnées initiales du CSV pour affichage complet
         const metaDetails = Object.keys(row)
           .filter(k => !k.startsWith('result_') && !k.startsWith('_') && k !== 'latitude' && k !== 'longitude')
           .map(k => `<span class="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-[10px] break-all"><strong>${k}:</strong> ${row[k] || ''}</span>`)
@@ -343,7 +356,7 @@
               Ouvrir Google Maps ↗
             </button>
           </div>
-          <p class="text-gray-800 font-medium leading-snug">${row.result_label || 'Adresse introuvable ou imprécise'}</p>
+          <p class="text-gray-800 font-medium leading-snug">${row.result_label || 'Adresse introuvable / imprécise'}</p>
           <div class="flex flex-wrap gap-1 pt-1 border-t border-gray-50">${metaDetails}</div>
         `;
         notifContainer.appendChild(card);
@@ -354,7 +367,7 @@
     if (failCount === 0) {
       notifContainer.innerHTML = `
         <div class="text-center py-8 border border-dashed border-gray-200 rounded-xl bg-gray-50/50">
-          <p class="text-xs font-medium text-gray-500">✨ Toutes les adresses respectent le seuil de confiance requis !</p>
+          <p class="text-xs font-medium text-gray-500">✨ Toutes les adresses respectent le seuil de confiance !</p>
         </div>
       `;
     }
@@ -386,13 +399,11 @@
         mapMarker = L.marker([row._lat, row._lng]).addTo(mapInstance);
       }
     } else {
-      // Si aucune position trouvée, recentrer sur la France par défaut en attendant le clic
       mapInstance.setView([46.603354, 1.888334], 5);
       if (mapMarker) { mapInstance.removeLayer(mapMarker); mapMarker = null; }
     }
   };
 
-  // Convertit l'état courant des résultats filtrés en structure standard GeoJSON Point
   function buildFilteredGeoJSON() {
     const slider = document.getElementById('confidence-slider');
     const threshold = slider ? parseInt(slider.value) / 100 : 0.7;
@@ -414,10 +425,7 @@
         };
       });
 
-    return {
-      type: "FeatureCollection",
-      features: features
-    };
+    return { type: "FeatureCollection", features: features };
   }
 
   window.downloadGeoJSON = function () {
@@ -436,12 +444,12 @@
   window.exportGeoSheets = function () {
     const geojson = buildFilteredGeoJSON();
     if (!geojson.features.length) {
-      alert("Aucune adresse ne remplit les critères actuels pour être exportée.");
+      alert("Aucune adresse ne remplit les critères de confiance pour l'export.");
       return;
     }
 
     const payload = {
-      fileName: currentFile ? `Géocodage_${currentFile.name}` : 'Géocodage_Export.csv',
+      fileName: currentFile ? `Geocodage_${currentFile.name.replace('.csv', '')}` : 'Geocodage_Export',
       sentAt: new Date().toLocaleString('fr-FR'),
       featureCount: geojson.features.length,
       geojsonRaw: JSON.stringify(geojson)
@@ -459,7 +467,7 @@
       body: JSON.stringify(payload)
     })
     .then(() => {
-      sendBtn.textContent = '✓ Données transmises avec succès !';
+      sendBtn.textContent = '✓ Données transmises !';
       sendBtn.classList.replace('bg-gray-900', 'bg-emerald-600');
       setTimeout(() => {
         sendBtn.disabled = false;
@@ -473,5 +481,8 @@
       sendBtn.textContent = oldText;
     });
   };
+
+  // Exécution immédiate au premier chargement de l'injection de script
+  window.initGeocodeur();
 
 })();
