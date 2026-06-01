@@ -34,12 +34,12 @@
     .tools-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      grid-template-rows: auto auto;
+      grid-template-rows: auto auto auto;
       gap: 16px;
       transition: grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1);
     }
 
-    .tools-grid.expanded-1, .tools-grid.expanded-2, .tools-grid.expanded-3, .tools-grid.expanded-4 {
+    .tools-grid.expanded-1, .tools-grid.expanded-2, .tools-grid.expanded-3, .tools-grid.expanded-4, .tools-grid.expanded-5 {
       grid-template-columns: 1fr;
     }
 
@@ -71,7 +71,7 @@
     .slot-card.expanded {
       min-height: 560px;
       cursor: default;
-      transform: none;
+      transform: none !important;
       box-shadow: 0 12px 48px rgba(0,0,0,0.09);
       border-color: #D8D8D4;
       align-items: stretch;
@@ -79,13 +79,28 @@
       padding: 0;
     }
 
+    /* Slot 5 Specific thin look when minimized */
+    #slot5 {
+      min-height: 64px;
+      flex-direction: row;
+      justify-content: flex-start;
+      padding: 0 24px;
+    }
+
+    #slot5.expanded {
+      min-height: 560px;
+      flex-direction: column;
+      padding: 0;
+    }
+
     .slot-card.expanded:hover { transform: none; }
 
     /* Hidden slots when grid is expanded */
-    .tools-grid.expanded-1 #slot2, .tools-grid.expanded-1 #slot3, .tools-grid.expanded-1 #slot4 { display: none; }
-    .tools-grid.expanded-2 #slot1, .tools-grid.expanded-2 #slot3, .tools-grid.expanded-2 #slot4 { display: none; }
-    .tools-grid.expanded-3 #slot1, .tools-grid.expanded-3 #slot2, .tools-grid.expanded-3 #slot4 { display: none; }
-    .tools-grid.expanded-4 #slot1, .tools-grid.expanded-4 #slot2, .tools-grid.expanded-4 #slot3 { display: none; }
+    .tools-grid.expanded-1 #slot2, .tools-grid.expanded-1 #slot3, .tools-grid.expanded-1 #slot4, .tools-grid.expanded-1 #slot5 { display: none; }
+    .tools-grid.expanded-2 #slot1, .tools-grid.expanded-2 #slot3, .tools-grid.expanded-2 #slot4, .tools-grid.expanded-2 #slot5 { display: none; }
+    .tools-grid.expanded-3 #slot1, .tools-grid.expanded-3 #slot2, .tools-grid.expanded-3 #slot4, .tools-grid.expanded-3 #slot5 { display: none; }
+    .tools-grid.expanded-4 #slot1, .tools-grid.expanded-4 #slot2, .tools-grid.expanded-4 #slot3, .tools-grid.expanded-4 #slot5 { display: none; }
+    .tools-grid.expanded-5 #slot1, .tools-grid.expanded-5 #slot2, .tools-grid.expanded-5 #slot3, .tools-grid.expanded-5 #slot4 { display: none; }
 
     .slot-card::after {
       content: '';
@@ -275,6 +290,25 @@
         </div>
       </div>
 
+      <div class="slot-card anim-5 col-span-2" id="slot5" onclick="openSlot5(event)">
+        <div class="slot-default !flex-row !gap-4 w-full" id="slot5-default">
+          <div class="slot-icon !w-9 !h-9 !text-base">🗂️</div>
+          <span class="slot-label !p-0 !text-left text-sm font-medium text-gray-800">Organiser mes fichiers cloud</span>
+          <span class="text-xs text-gray-400 ml-auto hidden sm:inline">Dossiers, renommage & nettoyage du catalogue →</span>
+        </div>
+        <div id="orga-panel" class="expanded-panel">
+          <div class="panel-header">
+            <span class="panel-title">Gestionnaire & Organisateur de fichiers</span>
+            <button class="close-btn" onclick="closeSlot5(event)" title="Fermer">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round">
+                <line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/>
+              </svg>
+            </button>
+          </div>
+          <div id="orga-content" class="panel-content"></div>
+        </div>
+      </div>
+
     </div>
 
     <footer class="text-center mt-20 anim-5">
@@ -284,168 +318,105 @@
   </div>
 
   <script>
-    let slot1Open = false;
-    let slot2Open = false;
-    let slot3Open = false;
-    let slot4Open = false;
+    let slot1Open = false; let slot2Open = false; let slot3Open = false; let slot4Open = false; let slot5Open = false;
 
     function openSlot1(e) {
-      if (slot1Open || slot2Open || slot3Open || slot4Open) return;
+      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open) return;
       slot1Open = true;
-      const grid = document.getElementById('toolsGrid');
-      const card = document.getElementById('slot1');
-      const def = document.getElementById('slot1-default');
-      const panel = document.getElementById('upload-panel');
-      grid.classList.add('expanded-1');
-      card.classList.add('expanded');
-      def.style.display = 'none';
-
+      const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot1');
+      const def = document.getElementById('slot1-default'); const panel = document.getElementById('upload-panel');
+      grid.classList.add('expanded-1'); card.classList.add('expanded'); def.style.display = 'none';
       if (!document.getElementById('upload-js')) {
-        const script = document.createElement('script');
-        script.id = 'upload-js';
-        script.src = 'outils/upload.js';
-        document.body.appendChild(script);
-      } else if (typeof initUpload === 'function') {
-        initUpload();
-      }
-      panel.style.display = 'flex';
-      requestAnimationFrame(() => panel.classList.add('visible'));
+        const script = document.createElement('script'); script.id = 'upload-js'; script.src = 'outils/upload.js'; document.body.appendChild(script);
+      } else if (typeof initUpload === 'function') { initUpload(); }
+      panel.style.display = 'flex'; requestAnimationFrame(() => panel.classList.add('visible'));
     }
-
     function closeSlot1(e) {
-      e.stopPropagation();
-      slot1Open = false;
-      const grid = document.getElementById('toolsGrid');
-      const card = document.getElementById('slot1');
-      const def = document.getElementById('slot1-default');
-      const panel = document.getElementById('upload-panel');
+      e.stopPropagation(); slot1Open = false;
+      const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot1');
+      const def = document.getElementById('slot1-default'); const panel = document.getElementById('upload-panel');
       panel.classList.remove('visible');
-      setTimeout(() => {
-        panel.style.display = 'none';
-        grid.classList.remove('expanded-1');
-        card.classList.remove('expanded');
-        def.style.display = 'flex';
-      }, 320);
+      setTimeout(() => { panel.style.display = 'none'; grid.classList.remove('expanded-1'); card.classList.remove('expanded'); def.style.display = 'flex'; }, 320);
     }
 
     function openSlot2(e) {
-      if (slot1Open || slot2Open || slot3Open || slot4Open) return;
+      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open) return;
       slot2Open = true;
-      const grid = document.getElementById('toolsGrid');
-      const card = document.getElementById('slot2');
-      const def = document.getElementById('slot2-default');
-      const panel = document.getElementById('geocodeur-panel');
-      grid.classList.add('expanded-2');
-      card.classList.add('expanded');
-      def.style.display = 'none';
-      panel.style.display = 'flex';
-      requestAnimationFrame(() => panel.classList.add('visible'));
-
+      const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot2');
+      const def = document.getElementById('slot2-default'); const panel = document.getElementById('geocodeur-panel');
+      grid.classList.add('expanded-2'); card.classList.add('expanded'); def.style.display = 'none';
+      panel.style.display = 'flex'; requestAnimationFrame(() => panel.classList.add('visible'));
       if (!document.getElementById('geocodeur-js')) {
-        const script = document.createElement('script');
-        script.id = 'geocodeur-js';
-        script.src = 'outils/geocodeur.js';
-        script.onload = () => { if (typeof initGeocodeur === 'function') initGeocodeur(); };
-        document.body.appendChild(script);
-      } else if (typeof initGeocodeur === 'function') {
-        initGeocodeur();
-      }
+        const script = document.createElement('script'); script.id = 'geocodeur-js'; script.src = 'outils/geocodeur.js';
+        script.onload = () => { if (typeof initGeocodeur === 'function') initGeocodeur(); }; document.body.appendChild(script);
+      } else if (typeof initGeocodeur === 'function') { initGeocodeur(); }
     }
-
     function closeSlot2(e) {
-      e.stopPropagation();
-      slot2Open = false;
-      const grid = document.getElementById('toolsGrid');
-      const card = document.getElementById('slot2');
-      const def = document.getElementById('slot2-default');
-      const panel = document.getElementById('geocodeur-panel');
+      e.stopPropagation(); slot2Open = false;
+      const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot2');
+      const def = document.getElementById('slot2-default'); const panel = document.getElementById('geocodeur-panel');
       panel.classList.remove('visible');
-      setTimeout(() => {
-        panel.style.display = 'none';
-        grid.classList.remove('expanded-2');
-        card.classList.remove('expanded');
-        def.style.display = 'flex';
-      }, 320);
+      setTimeout(() => { panel.style.display = 'none'; grid.classList.remove('expanded-2'); card.classList.remove('expanded'); def.style.display = 'flex'; }, 320);
     }
 
     function openSlot3(e) {
-      if (slot1Open || slot2Open || slot3Open || slot4Open) return;
+      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open) return;
       slot3Open = true;
-      const grid = document.getElementById('toolsGrid');
-      const card = document.getElementById('slot3');
-      const def = document.getElementById('slot3-default');
-      const panel = document.getElementById('iso-panel');
-      grid.classList.add('expanded-3');
-      card.classList.add('expanded');
-      def.style.display = 'none';
-      panel.style.display = 'flex';
-      requestAnimationFrame(() => panel.classList.add('visible'));
-
+      const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot3');
+      const def = document.getElementById('slot3-default'); const panel = document.getElementById('iso-panel');
+      grid.classList.add('expanded-3'); card.classList.add('expanded'); def.style.display = 'none';
+      panel.style.display = 'flex'; requestAnimationFrame(() => panel.classList.add('visible'));
       if (!document.getElementById('iso-js')) {
-        const script = document.createElement('script');
-        script.id = 'iso-js';
-        script.src = 'outils/iso.js';
-        script.onload = () => { if (typeof initIso === 'function') initIso(); };
-        document.body.appendChild(script);
-      } else if (typeof initIso === 'function') {
-        initIso();
-      }
+        const script = document.createElement('script'); script.id = 'iso-js'; script.src = 'outils/iso.js';
+        script.onload = () => { if (typeof initIso === 'function') initIso(); }; document.body.appendChild(script);
+      } else if (typeof initIso === 'function') { initIso(); }
     }
-
     function closeSlot3(e) {
-      e.stopPropagation();
-      slot3Open = false;
-      const grid = document.getElementById('toolsGrid');
-      const card = document.getElementById('slot3');
-      const def = document.getElementById('slot3-default');
-      const panel = document.getElementById('iso-panel');
+      e.stopPropagation(); slot3Open = false;
+      const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot3');
+      const def = document.getElementById('slot3-default'); const panel = document.getElementById('iso-panel');
       panel.classList.remove('visible');
-      setTimeout(() => {
-        panel.style.display = 'none';
-        grid.classList.remove('expanded-3');
-        card.classList.remove('expanded');
-        def.style.display = 'flex';
-      }, 320);
+      setTimeout(() => { panel.style.display = 'none'; grid.classList.remove('expanded-3'); card.classList.remove('expanded'); def.style.display = 'flex'; }, 320);
     }
 
     function openSlot4(e) {
-      if (slot1Open || slot2Open || slot3Open || slot4Open) return;
+      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open) return;
       slot4Open = true;
-      const grid = document.getElementById('toolsGrid');
-      const card = document.getElementById('slot4');
-      const def = document.getElementById('slot4-default');
-      const panel = document.getElementById('display-panel');
-      grid.classList.add('expanded-4');
-      card.classList.add('expanded');
-      def.style.display = 'none';
-      panel.style.display = 'flex';
-      requestAnimationFrame(() => panel.classList.add('visible'));
-
+      const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot4');
+      const def = document.getElementById('slot4-default'); const panel = document.getElementById('display-panel');
+      grid.classList.add('expanded-4'); card.classList.add('expanded'); def.style.display = 'none';
+      panel.style.display = 'flex'; requestAnimationFrame(() => panel.classList.add('visible'));
       if (!document.getElementById('display-js')) {
-        const script = document.createElement('script');
-        script.id = 'display-js';
-        script.src = 'outils/display.js';
-        script.onload = () => { if (typeof initDisplay === 'function') initDisplay(); };
-        document.body.appendChild(script);
-      } else if (typeof initDisplay === 'function') {
-        initDisplay();
-      }
+        const script = document.createElement('script'); script.id = 'display-js'; script.src = 'outils/display.js';
+        script.onload = () => { if (typeof initDisplay === 'function') initDisplay(); }; document.body.appendChild(script);
+      } else if (typeof initDisplay === 'function') { initDisplay(); }
+    }
+    function closeSlot4(e) {
+      e.stopPropagation(); slot4Open = false;
+      const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot4');
+      const def = document.getElementById('slot4-default'); const panel = document.getElementById('display-panel');
+      panel.classList.remove('visible');
+      setTimeout(() => { panel.style.display = 'none'; grid.classList.remove('expanded-4'); card.classList.remove('expanded'); def.style.display = 'flex'; }, 320);
     }
 
-    function closeSlot4(e) {
-      e.stopPropagation();
-      slot4Open = false;
-      const grid = document.getElementById('toolsGrid');
-      const card = document.getElementById('slot4');
-      const def = document.getElementById('slot4-default');
-      const panel = document.getElementById('display-panel');
+    function openSlot5(e) {
+      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open) return;
+      slot5Open = true;
+      const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot5');
+      const def = document.getElementById('slot5-default'); const panel = document.getElementById('orga-panel');
+      grid.classList.add('expanded-5'); card.classList.add('expanded'); def.style.display = 'none';
+      panel.style.display = 'flex'; requestAnimationFrame(() => panel.classList.add('visible'));
+      if (!document.getElementById('orga-js')) {
+        const script = document.createElement('script'); script.id = 'orga-js'; script.src = 'outils/orga.js';
+        script.onload = () => { if (typeof initOrga === 'function') initOrga(); }; document.body.appendChild(script);
+      } else if (typeof initOrga === 'function') { initOrga(); }
+    }
+    function closeSlot5(e) {
+      e.stopPropagation(); slot5Open = false;
+      const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot5');
+      const def = document.getElementById('slot5-default'); const panel = document.getElementById('orga-panel');
       panel.classList.remove('visible');
-      setTimeout(() => {
-        panel.style.display = 'none';
-        grid.classList.remove('expanded-4');
-        card.classList.remove('expanded');
-        def.style.display = 'flex';
-      }, 320);
+      setTimeout(() => { panel.style.display = 'none'; grid.classList.remove('expanded-5'); card.classList.remove('expanded'); def.style.display = 'flex'; }, 320);
     }
   </script>
 </body>
