@@ -1,20 +1,27 @@
 /**
  * outils/upload.js
- * Gère le dépôt de fichiers .geojson et .zip (shapefile).
- * Convertit les shapefiles en GeoJSON via shpjs, puis envoie à Google Sheets via Apps Script.
+ * Gère le dépôt de fichiers .geojson, .zip (shapefile) ET de fichiers Shapefile séparés (.shp, .dbf, etc.).
+ * Regroupe les composants de shapefiles non zippés par nom, les compresse à la volée,
+ * convertit le tout en GeoJSON via shpjs, puis envoie à Google Sheets via Apps Script.
  *
- * ⚙️  CONFIG : remplace GOOGLE_SCRIPT_URL par l'URL de ton Apps Script déployé.
+ * ⚙️ CONFIG : remplace GOOGLE_SCRIPT_URL par l'URL de ton Apps Script déployé.
  */
 
 (function () {
 
   const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx3yvNTl-aFgd7kAaSc2kyETuMfeUqIn4j2hnvKEs6dpGs7jNo4vMIdTFIGhpSyJm6c/exec';
 
-  /* ── Chargement de shpjs (shapefile → GeoJSON) ── */
+  /* ── Chargement des dépendances (shpjs + JSZip) ── */
   if (!window._shpjsLoaded) {
     const s = document.createElement('script');
     s.src = 'https://unpkg.com/shpjs@latest/dist/shp.js';
     s.onload = () => { window._shpjsLoaded = true; };
+    document.head.appendChild(s);
+  }
+  if (!window._jszipLoaded) {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+    s.onload = () => { window._jszipLoaded = true; };
     document.head.appendChild(s);
   }
 
@@ -52,6 +59,7 @@
       .drop-hint   { font-size: 0.75rem; color: #B0B0A8; margin-top: 5px; }
       .drop-formats {
         display: inline-flex; gap: 6px; margin-top: 10px; justify-content: center;
+        flex-wrap: wrap;
       }
       .fmt-badge {
         font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.04em;
@@ -88,7 +96,7 @@
         height: 100%; border-radius: 99px; background: #3a3a38;
         width: 0%; transition: width 0.35s ease;
       }
-      .file-progress-bar.done    { background: #52c48a; }
+      .file-progress-bar.done     { background: #52c48a; }
       .file-progress-bar.errored { background: #E05A5A; }
 
       .file-remove {
@@ -142,13 +150,14 @@
     </div>` : ''}
 
     <div id="drop-zone">
-      <input type="file" id="file-input" multiple accept=".geojson,.json,.zip" />
+      <input type="file" id="file-input" multiple accept=".geojson,.json,.zip,.shp,.dbf,.shx,.prj" />
       <span class="drop-emoji">🗺️</span>
       <p class="drop-title">Glisse tes fichiers géo ici</p>
-      <p class="drop-hint">ou clique pour parcourir</p>
+      <p class="drop-hint">ou clique pour parcourir (accepte les lots de fichiers Shapefile)</p>
       <div class="drop-formats">
         <span class="fmt-badge">.geojson</span>
-        <span class="fmt-badge">.zip shapefile</span>
+        <span class="fmt-badge">.zip (shapefile)</span>
+        <span class="fmt-badge">unitaire (.shp, .dbf, .shx, .prj)</span>
       </div>
     </div>
 
@@ -164,7 +173,7 @@
   const sendBtn   = document.getElementById('upload-send-btn');
   const status    = document.getElementById('upload-status');
 
-  // files[] = { file, id, geojson: null | object, error: null | string }
+  // files[] = { name, size, id, isVirtualZip, components: [], geojson: null | object, error: null | string }
   let files = [];
 
   /* ── Helpers ── */
@@ -180,54 +189,79 @@
     return n.endsWith('.geojson') || n.endsWith('.json');
   }
 
-  /* ── Parsing ── */
+  /* ── Parsing d'une entité (Fichier unique ou Paquet Shapefile recomposé) ── */
   async function parseFile(entry) {
-    const { file } = entry;
-
-    if (isGeoJson(file.name)) {
-      const text = await file.text();
+    // Cas 1 : GéoJSON classique
+    if (isGeoJson(entry.name)) {
+      const text = await entry.file.text();
       const gj   = JSON.parse(text);
       if (gj.type !== 'FeatureCollection' && gj.type !== 'Feature' && !gj.features) {
         throw new Error('JSON invalide — pas un GeoJSON reconnu');
       }
-      // Normalise en FeatureCollection
       if (gj.type === 'Feature') return { type: 'FeatureCollection', features: [gj] };
       return gj;
     }
 
-    if (isZip(file.name)) {
+    // Cas 2 : Fichier ZIP brut déjà existant
+    if (isZip(entry.name)) {
       if (!window.shp) throw new Error('Librairie shpjs pas encore chargée, réessaie dans 2s');
-      const buffer = await file.arrayBuffer();
-      const gj     = await window.shp(buffer);
-      // shpjs peut renvoyer un tableau si le zip contient plusieurs layers
-      if (Array.isArray(gj)) {
-        return {
-          type: 'FeatureCollection',
-          features: gj.flatMap(fc => fc.features || [])
-        };
-      }
-      return gj;
+      const buffer = await entry.file.arrayBuffer();
+      return await processShpBuffer(buffer);
     }
 
-    throw new Error('Format non supporté — utilise .geojson ou .zip');
+    // Cas 3 : Shapefile morcelé qu'on a regroupé virtuellement dans un ZIP
+    if (entry.isVirtualZip) {
+      if (!window.shp) throw new Error('Librairie shpjs en cours de chargement…');
+      if (!window.JSZip) throw new Error('Librairie de compression en cours de chargement…');
+
+      // Vérifications de sécurité de base pour un Shapefile fonctionnel
+      const extensions = entry.components.map(f => f.name.toLowerCase().split('.').pop());
+      if (!extensions.includes('shp')) throw new Error('Composant .shp manquant');
+      if (!extensions.includes('dbf')) throw new Error('Composant .dbf (données attributaires) manquant');
+
+      // On monte le ZIP à la volée
+      const zip = new window.JSZip();
+      for (const component of entry.components) {
+        zip.file(component.name, component);
+      }
+      
+      const buffer = await zip.generateAsync({ type: 'arraybuffer' });
+      return await processShpBuffer(buffer);
+    }
+
+    throw new Error('Format non supporté');
   }
 
-  /* ── Rendu d'une ligne ── */
+  async function processShpBuffer(buffer) {
+    const gj = await window.shp(buffer);
+    if (Array.isArray(gj)) {
+      return {
+        type: 'FeatureCollection',
+        features: gj.flatMap(fc => fc.features || [])
+      };
+    }
+    return gj;
+  }
+
+  /* ── Rendu d'une ligne dans l'interface ── */
   function renderFileRow(entry) {
-    const { file, id } = entry;
     const row = document.createElement('div');
     row.className = 'file-row';
-    row.id = 'row_' + id;
+    row.id = 'row_' + entry.id;
+    
+    let icon = '🗺️';
+    if (isZip(entry.name) || entry.isVirtualZip) icon = '🗜️';
+
     row.innerHTML = `
-      <span class="file-icon">${isZip(file.name) ? '🗜️' : '🗺️'}</span>
+      <span class="file-icon">${icon}</span>
       <div class="file-meta">
-        <p class="file-name">${file.name}</p>
-        <p class="file-sub" id="sub_${id}">${formatBytes(file.size)} · Lecture en cours…</p>
-        <div class="file-progress-wrap" id="pwrap_${id}">
-          <div class="file-progress-bar" id="bar_${id}"></div>
+        <p class="file-name">${entry.name}</p>
+        <p class="file-sub" id="sub_${entry.id}">${formatBytes(entry.size)} · Traitement…</p>
+        <div class="file-progress-wrap" id="pwrap_${entry.id}">
+          <div class="file-progress-bar" id="bar_${entry.id}"></div>
         </div>
       </div>
-      <button class="file-remove" title="Retirer" onclick="removeFile('${id}')">✕</button>
+      <button class="file-remove" title="Retirer" onclick="removeFile('${entry.id}')">✕</button>
     `;
     fileList.appendChild(row);
   }
@@ -254,36 +288,85 @@
     }
   }
 
-  /* ── Ajout de fichiers + parsing immédiat ── */
+  /* ── Analyse et répartition des fichiers déposés ── */
   async function addFiles(newFiles) {
+    const shpGroups = {}; // Pour regrouper les .shp, .dbf par leur nom racine
+    const standaloneFiles = [];
+
+    // 1. Tri et regroupement
     for (const file of Array.from(newFiles)) {
-      if (!isGeoJson(file.name) && !isZip(file.name)) {
-        // Fichier ignoré silencieusement — mauvais format
-        status.textContent = `⚠️ "${file.name}" ignoré — utilise .geojson ou .zip`;
-        continue;
+      const name = file.name;
+      
+      if (isGeoJson(name) || isZip(name)) {
+        standaloneFiles.push({
+          file,
+          name: file.name,
+          size: file.size,
+          id: 'f_' + Date.now() + Math.random().toString(36).slice(2),
+          isVirtualZip: false,
+          geojson: null,
+          error: null
+        });
+      } else {
+        // C'est potentiellement un morceau de shapefile séparé (.shp, .dbf, etc.)
+        const parts = name.split('.');
+        const ext = parts.pop().toLowerCase();
+        const rootName = parts.join('.'); // Nom sans extension
+
+        const shpExtensions = ['shp', 'dbf', 'shx', 'prj', 'cpg', 'qpj'];
+        if (shpExtensions.includes(ext)) {
+          if (!shpGroups[rootName]) shpGroups[rootName] = [];
+          shpGroups[rootName].push(file);
+        } else {
+          status.textContent = `⚠️ "${name}" ignoré — format non reconnu`;
+        }
       }
-      const id = 'f_' + Date.now() + Math.random().toString(36).slice(2);
-      const entry = { file, id, geojson: null, error: null };
+    }
+
+    // 2. Traitement des fichiers GeoJSON et ZIP classiques
+    for (const entry of standaloneFiles) {
       files.push(entry);
       renderFileRow(entry);
-
-      // Parse en arrière-plan
-      parseFile(entry)
-        .then(gj => {
-          entry.geojson = gj;
-          const count = gj.features ? gj.features.length : '?';
-          setRowSub(id, `${formatBytes(file.size)} · ${count} feature${count > 1 ? 's' : ''} ✓`);
-          setBar(id, 100, 'done');
-        })
-        .catch(err => {
-          entry.error = err.message;
-          setRowSub(id, `Erreur : ${err.message}`, true);
-          setRowState(id, 'error');
-          setBar(id, 100, 'errored');
-        })
-        .finally(updateSendBtn);
+      triggerParsing(entry);
     }
+
+    // 3. Traitement des groupes Shapefile unitaires
+    for (const [rootName, components] of Object.entries(shpGroups)) {
+      const totalSize = components.reduce((acc, f) => acc + f.size, 0);
+      const entry = {
+        name: `${rootName} (Shapefile)`,
+        size: totalSize,
+        id: 'shp_' + Date.now() + Math.random().toString(36).slice(2),
+        isVirtualZip: true,
+        components: components,
+        geojson: null,
+        error: null
+      };
+
+      files.push(entry);
+      renderFileRow(entry);
+      triggerParsing(entry);
+    }
+
     updateSendBtn();
+  }
+
+  // Lancement asynchrone du parsing
+  function triggerParsing(entry) {
+    parseFile(entry)
+      .then(gj => {
+        entry.geojson = gj;
+        const count = gj.features ? gj.features.length : '?';
+        setRowSub(entry.id, `${formatBytes(entry.size)} · ${count} entité${count > 1 ? 's' : ''} prête${count > 1 ? 's' : ''} ✓`);
+        setBar(entry.id, 100, 'done');
+      })
+      .catch(err => {
+        entry.error = err.message;
+        setRowSub(entry.id, `Erreur : ${err.message}`, true);
+        setRowState(entry.id, 'error');
+        setBar(entry.id, 100, 'errored');
+      })
+      .finally(updateSendBtn);
   }
 
   window.removeFile = function (id) {
@@ -297,12 +380,12 @@
     const ready = files.filter(f => f.geojson && !f.error);
     sendBtn.style.display = files.length > 0 ? 'block' : 'none';
     sendBtn.textContent   = ready.length
-      ? `Envoyer ${ready.length} fichier${ready.length > 1 ? 's' : ''} vers Google Sheets →`
+      ? `Envoyer ${ready.length} couche${ready.length > 1 ? 's' : ''} vers Google Sheets →`
       : 'Envoyer vers Google Sheets →';
     status.textContent = '';
   }
 
-  /* ── Drag & drop ── */
+  /* ── Drag & drop Events ── */
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
   dropZone.addEventListener('drop', e => {
@@ -327,11 +410,11 @@
     let sent = 0, errors = 0;
 
     for (const entry of ready) {
-      const { id, file, geojson } = entry;
+      const { id, name, geojson } = entry;
       setBar(id, 30);
 
       const payload = {
-        fileName    : file.name,
+        fileName    : name,
         sentAt      : new Date().toLocaleString('fr-FR'),
         featureCount: geojson.features ? geojson.features.length : 0,
         geojsonRaw  : JSON.stringify(geojson)
@@ -339,10 +422,8 @@
 
       try {
         setBar(id, 60);
-        const res = await fetch(GOOGLE_SCRIPT_URL, {
+        await fetch(GOOGLE_SCRIPT_URL, {
           method : 'POST',
-          // Apps Script en mode "no-cors" ne renvoie pas de body lisible,
-          // mais la ligne est bien insérée côté sheet.
           mode   : 'no-cors',
           headers: { 'Content-Type': 'application/json' },
           body   : JSON.stringify(payload)
@@ -361,7 +442,7 @@
 
     sendBtn.textContent = errors
       ? `${sent} envoyé(s), ${errors} erreur(s)`
-      : `✓ ${sent} fichier${sent > 1 ? 's' : ''} envoyé${sent > 1 ? 's' : ''} !`;
+      : `✓ ${sent} couche${sent > 1 ? 's' : ''} envoyée${sent > 1 ? 's' : ''} !`;
 
     setTimeout(() => {
       files = [];
@@ -373,7 +454,7 @@
     }, 3000);
   });
 
-  /* ── Init publique (re-ouverture) ── */
+  /* ── Init publique (ré-ouverture) ── */
   window.initUpload = function () {
     files = [];
     if (fileList) fileList.innerHTML = '';
