@@ -330,16 +330,18 @@
       card.classList.add('expanded');
       def.style.display = 'none';
 
+      panel.style.display = 'flex';
+      requestAnimationFrame(() => panel.classList.add('visible'));
+
       if (!document.getElementById('geocodeur-js')) {
         const script = document.createElement('script');
         script.id = 'geocodeur-js';
         script.src = 'outils/geocodeur.js';
+        script.onload = () => { if (typeof initGeocodeur === 'function') initGeocodeur(); };
         document.body.appendChild(script);
       } else if (typeof initGeocodeur === 'function') {
         initGeocodeur();
       }
-      panel.style.display = 'flex';
-      requestAnimationFrame(() => panel.classList.add('visible'));
     }
 
     function closeSlot2(e) {
@@ -369,16 +371,18 @@
       card.classList.add('expanded');
       def.style.display = 'none';
 
+      panel.style.display = 'flex';
+      requestAnimationFrame(() => panel.classList.add('visible'));
+
       if (!document.getElementById('iso-js')) {
         const script = document.createElement('script');
         script.id = 'iso-js';
         script.src = 'outils/iso.js';
+        script.onload = () => { if (typeof initIso === 'function') initIso(); };
         document.body.appendChild(script);
       } else if (typeof initIso === 'function') {
         initIso();
       }
-      panel.style.display = 'flex';
-      requestAnimationFrame(() => panel.classList.add('visible'));
     }
 
     function closeSlot3(e) {
