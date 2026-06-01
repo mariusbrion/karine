@@ -2,11 +2,13 @@
  * outils/iso.js
  * Générateur d'isochrones et d'isodistances basé sur l'API OpenRouteService (ORS).
  * Gestion cumulative des entités géographiques et file d'attente sérialisée (4s).
+ * Optimisé en méthode GET pour contourner les restrictions CORS du Preflight.
  */
 
 (function () {
   const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx3yvNTl-aFgd7kAaSc2kyETuMfeUqIn4j2hnvKEs6dpGs7jNo4vMIdTFIGhpSyJm6c/exec';
 
+  // Décodage du token ORS obscurci en Base64
   const encodedKey = "NWIzY2UzNTk3ODUxMTEwMDAxY2Y2MjQ4ODNlMDMyZTkyZmMzNDdiMzlhOGI5MmZkOTM1NDYwMGU=";
   const apiKey = atob(encodedKey);
 
@@ -23,7 +25,7 @@
   let isoMapInstance = null;
   let isoLayerGroup = null;
   let accumulatedFeatures = []; 
-  let cloudIsoStorage = []; // Stockage global indexé
+  let cloudIsoStorage = [];
 
   window.initIso = function () {
     accumulatedFeatures = [];
@@ -123,14 +125,23 @@
     document.getElementById('time-conversion-output').textContent = `Soit environ ${timeMinutes} minute${timeMinutes > 1 ? 's' : ''} de trajet`;
   };
 
+  // ── REFONDU EN METHODE GET CONTRE LE BUG CORS PREFLIGHT ──
   async function fetchIsochrone(lat, lng, distanceMeters, profile) {
-    const url = `https://api.openrouteservice.org/v2/isochrones/${profile}`;
+    const cleanLng = parseFloat(lng);
+    const cleanLat = parseFloat(lat);
+    const cleanDist = parseInt(distanceMeters);
+
+    const url = `https://api.openrouteservice.org/v2/isochrones/${profile}?api_key=${apiKey}&locations=${cleanLng},${cleanLat}&range=${cleanDist}&range_type=distance`;
+    
     const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Accept': 'application/json, geo+json', 'Authorization': apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ locations: [[lng, lat]], range: [distanceMeters], range_type: "distance" })
+      method: 'GET',
+      headers: { 'Accept': 'application/json, application/geo+json; charset=utf-8' }
     });
-    if (!response.ok) throw new Error(`Erreur API ORS (${response.status})`);
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "Détails indisponibles");
+      throw new Error(`Erreur API ORS (Code HTTP ${response.status}) : ${errText}`);
+    }
     return await response.json();
   }
 
@@ -149,7 +160,7 @@
         displayIsoOnMap(geojson);
         enableActionButtons();
       })
-      .catch(err => alert(err.message));
+      .catch(err => alert("Impossible de générer la zone : " + err.message));
   }
 
   window.fetchPointsFromCloud = function () {
@@ -163,7 +174,7 @@
         if (!files.length) {
           alert("Aucun fichier archivé trouvé."); cloudBtn.disabled = false; return;
         }
-        cloudIsoStorage = files; // Sauvegarde en mémoire globale
+        cloudIsoStorage = files;
 
         containerSelect.innerHTML = `
           <label class="block font-medium text-gray-500 mb-1 text-[10px]">Sélectionner une couche :</label>
@@ -274,6 +285,5 @@
     }).catch(err => { alert(err.message); sendBtn.disabled = false; });
   };
 
-  // Amorçage retardé
-  setTimeout(() => { window.initIso(); }, 500);
+  setTimeout(() => { window.initIso(); }, 550);
 })();
