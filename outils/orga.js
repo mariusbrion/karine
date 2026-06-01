@@ -5,7 +5,7 @@
  */
 
 (function () {
-  const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz1kvkUwAEwD-3Bc9SZqACaaZTVGhhGy_Om-F8vK0adfC5pBCg5amBNUEqSeteKJIrV/exec';
+  const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyl132O-cCNrE5H4AVHE2F7pCWO3bzq_r3Tz-MK562sOkd52XyS8auIga0p8h5Rrjkh/exec';
 
   const container = document.getElementById('orga-content');
   if (!container) return;
