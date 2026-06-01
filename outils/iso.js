@@ -1,12 +1,12 @@
 /**
  * outils/iso.js
- * Générateur d'isochrones et d'isodistances basé sur l'API OpenRouteService (ORS).
+ * Générateur d'isochrones et d'isodistances basé sur l'API OpenRouteService (HeiGIT).
  * Gestion cumulative des entités géographiques et file d'attente sérialisée (4s).
- * Optimisé en méthode GET pour contourner les restrictions CORS du Preflight.
+ * Ajusté avec le nouveau domaine officiel api.heigit.org suite à la dépréciation.
  */
 
 (function () {
-  const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx3yvNTl-aFgd7kAaSc2kyETuMfeUqIn4j2hnvKEs6dpGs7jNo4vMIdTFIGhpSyJm6c/exec';
+  const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz1kvkUwAEwD-3Bc9SZqACaaZTVGhhGy_Om-F8vK0adfC5pBCg5amBNUEqSeteKJIrV/exec';
 
   // Décodage du token ORS obscurci en Base64
   const encodedKey = "NWIzY2UzNTk3ODUxMTEwMDAxY2Y2MjQ4ODNlMDMyZTkyZmMzNDdiMzlhOGI5MmZkOTM1NDYwMGU=";
@@ -125,13 +125,14 @@
     document.getElementById('time-conversion-output').textContent = `Soit environ ${timeMinutes} minute${timeMinutes > 1 ? 's' : ''} de trajet`;
   };
 
-  // ── REFONDU EN METHODE GET CONTRE LE BUG CORS PREFLIGHT ──
+  // ── ROUTAGE SUR LE NOUVEL ENDPOINT OFFICIEL DE HEIGIT ──
   async function fetchIsochrone(lat, lng, distanceMeters, profile) {
     const cleanLng = parseFloat(lng);
     const cleanLat = parseFloat(lat);
     const cleanDist = parseInt(distanceMeters);
 
-    const url = `https://api.openrouteservice.org/v2/isochrones/${profile}?api_key=${apiKey}&locations=${cleanLng},${cleanLat}&range=${cleanDist}&range_type=distance`;
+    // Substitution du domaine api.openrouteservice.org par api.heigit.org
+    const url = `https://api.heigit.org/v2/isochrones/${profile}?api_key=${apiKey}&locations=${cleanLng},${cleanLat}&range=${cleanDist}&range_type=distance`;
     
     const response = await fetch(url, {
       method: 'GET',
@@ -140,7 +141,7 @@
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "Détails indisponibles");
-      throw new Error(`Erreur API ORS (Code HTTP ${response.status}) : ${errText}`);
+      throw new Error(`Erreur API HeiGIT (Code HTTP ${response.status}) : ${errText}`);
     }
     return await response.json();
   }
