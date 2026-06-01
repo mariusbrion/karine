@@ -39,7 +39,7 @@
       transition: grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1);
     }
 
-    .tools-grid.expanded-1, .tools-grid.expanded-2, .tools-grid.expanded-3 {
+    .tools-grid.expanded-1, .tools-grid.expanded-2, .tools-grid.expanded-3, .tools-grid.expanded-4 {
       grid-template-columns: 1fr;
     }
 
@@ -69,7 +69,7 @@
 
     /* Expanded state */
     .slot-card.expanded {
-      min-height: 520px;
+      min-height: 560px;
       cursor: default;
       transform: none;
       box-shadow: 0 12px 48px rgba(0,0,0,0.09);
@@ -85,6 +85,7 @@
     .tools-grid.expanded-1 #slot2, .tools-grid.expanded-1 #slot3, .tools-grid.expanded-1 #slot4 { display: none; }
     .tools-grid.expanded-2 #slot1, .tools-grid.expanded-2 #slot3, .tools-grid.expanded-2 #slot4 { display: none; }
     .tools-grid.expanded-3 #slot1, .tools-grid.expanded-3 #slot2, .tools-grid.expanded-3 #slot4 { display: none; }
+    .tools-grid.expanded-4 #slot1, .tools-grid.expanded-4 #slot2, .tools-grid.expanded-4 #slot3 { display: none; }
 
     .slot-card::after {
       content: '';
@@ -190,10 +191,10 @@
 </head>
 <body class="relative">
 
-  <div class="relative z-10 max-w-3xl mx-auto px-6 py-20">
+  <div class="relative z-10 max-w-4xl mx-auto px-4 sm:px-6 py-12 md:py-20">
 
-    <header class="text-center mb-16 anim-1">
-      <p class="badge mb-5">Espace personnel</p>
+    <header class="text-center mb-12 md:mb-16 anim-1">
+      <p class="badge mb-4">Espace personnel</p>
       <h1 class="title-font text-4xl md:text-5xl font-normal text-gray-900 leading-tight mb-4">
         La boîte à outils<br><em>de Karine</em>
       </h1>
@@ -256,14 +257,21 @@
         </div>
       </div>
 
-      <div class="slot-card anim-5" id="slot4">
-        <div class="slot-default">
-          <div class="slot-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9E9E98" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M12 8v8M8 12h8"/>
-            </svg>
+      <div class="slot-card anim-5" id="slot4" onclick="openSlot4(event)">
+        <div class="slot-default" id="slot4-default">
+          <div class="slot-icon">🗺️</div>
+          <span class="slot-label">Visualiseur cartographique<br>(Superposition de couches)</span>
+        </div>
+        <div id="display-panel" class="expanded-panel">
+          <div class="panel-header">
+            <span class="panel-title">Visualiseur Multi-couches</span>
+            <button class="close-btn" onclick="closeSlot4(event)" title="Fermer">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round">
+                <line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/>
+              </svg>
+            </button>
           </div>
-          <span class="slot-label">Outil 4</span>
+          <div id="display-content" class="panel-content !p-0"></div>
         </div>
       </div>
 
@@ -279,9 +287,10 @@
     let slot1Open = false;
     let slot2Open = false;
     let slot3Open = false;
+    let slot4Open = false;
 
     function openSlot1(e) {
-      if (slot1Open || slot2Open || slot3Open) return;
+      if (slot1Open || slot2Open || slot3Open || slot4Open) return;
       slot1Open = true;
       const grid = document.getElementById('toolsGrid');
       const card = document.getElementById('slot1');
@@ -320,7 +329,7 @@
     }
 
     function openSlot2(e) {
-      if (slot1Open || slot2Open || slot3Open) return;
+      if (slot1Open || slot2Open || slot3Open || slot4Open) return;
       slot2Open = true;
       const grid = document.getElementById('toolsGrid');
       const card = document.getElementById('slot2');
@@ -329,7 +338,6 @@
       grid.classList.add('expanded-2');
       card.classList.add('expanded');
       def.style.display = 'none';
-
       panel.style.display = 'flex';
       requestAnimationFrame(() => panel.classList.add('visible'));
 
@@ -361,7 +369,7 @@
     }
 
     function openSlot3(e) {
-      if (slot1Open || slot2Open || slot3Open) return;
+      if (slot1Open || slot2Open || slot3Open || slot4Open) return;
       slot3Open = true;
       const grid = document.getElementById('toolsGrid');
       const card = document.getElementById('slot3');
@@ -370,7 +378,6 @@
       grid.classList.add('expanded-3');
       card.classList.add('expanded');
       def.style.display = 'none';
-
       panel.style.display = 'flex';
       requestAnimationFrame(() => panel.classList.add('visible'));
 
@@ -396,6 +403,46 @@
       setTimeout(() => {
         panel.style.display = 'none';
         grid.classList.remove('expanded-3');
+        card.classList.remove('expanded');
+        def.style.display = 'flex';
+      }, 320);
+    }
+
+    function openSlot4(e) {
+      if (slot1Open || slot2Open || slot3Open || slot4Open) return;
+      slot4Open = true;
+      const grid = document.getElementById('toolsGrid');
+      const card = document.getElementById('slot4');
+      const def = document.getElementById('slot4-default');
+      const panel = document.getElementById('display-panel');
+      grid.classList.add('expanded-4');
+      card.classList.add('expanded');
+      def.style.display = 'none';
+      panel.style.display = 'flex';
+      requestAnimationFrame(() => panel.classList.add('visible'));
+
+      if (!document.getElementById('display-js')) {
+        const script = document.createElement('script');
+        script.id = 'display-js';
+        script.src = 'outils/display.js';
+        script.onload = () => { if (typeof initDisplay === 'function') initDisplay(); };
+        document.body.appendChild(script);
+      } else if (typeof initDisplay === 'function') {
+        initDisplay();
+      }
+    }
+
+    function closeSlot4(e) {
+      e.stopPropagation();
+      slot4Open = false;
+      const grid = document.getElementById('toolsGrid');
+      const card = document.getElementById('slot4');
+      const def = document.getElementById('slot4-default');
+      const panel = document.getElementById('display-panel');
+      panel.classList.remove('visible');
+      setTimeout(() => {
+        panel.style.display = 'none';
+        grid.classList.remove('expanded-4');
         card.classList.remove('expanded');
         def.style.display = 'flex';
       }, 320);
