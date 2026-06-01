@@ -212,12 +212,13 @@
           window.resetDisplayCloudBtn(); return;
         }
 
-        cloudFilesStorage = files; // Stockage indexé
+        cloudFilesStorage = files;
 
-        // Structuration des groupes de dossiers
+        // Structuration des groupes de dossiers (Lecture adaptative insensible à la casse)
         const groups = {};
         files.forEach((f, globalIdx) => {
-          const folderName = f.folder && f.folder.trim() !== "" ? f.folder.trim() : "Fichiers non classés";
+          const rawFolder = f.folder || f.Folder || "";
+          const folderName = rawFolder && String(rawFolder).trim() !== "" ? String(rawFolder).trim() : "Fichiers non classés";
           if (!groups[folderName]) groups[folderName] = [];
           groups[folderName].push({ data: f, index: globalIdx });
         });
@@ -240,7 +241,7 @@
                 <div class="border border-gray-200 bg-white rounded-lg overflow-hidden">
                   <div class="flex items-center justify-between px-2.5 py-1.5 bg-gray-100/70 select-none">
                     <div class="flex items-center gap-1.5 cursor-pointer flex-1 min-w-0" onclick="window.toggleCloudDispFolderDOM('c_fold_${fIdx}')">
-                      <span id="c_icon_fold_${fIdx}">📁</span>
+                      <span id="c_icon_fold_c_fold_${fIdx}">📁</span>
                       <span class="font-semibold text-gray-700 truncate text-[11px]">${folderName}</span>
                     </div>
                     <button onclick="window.loadCloudFolderToMap('${encodeURIComponent(folderName)}')" class="text-[9px] bg-gray-900 text-white font-medium px-1.5 py-0.5 rounded hover:bg-gray-800 shrink-0 ml-1">
@@ -273,14 +274,20 @@
       .catch(err => { alert(err.message); window.resetDisplayCloudBtn(); });
   };
 
+  // Correction de la cible de l'icône pour parer le crash sur toggle
   window.toggleCloudDispFolderDOM = function (id) {
     const el = document.getElementById(id);
-    const icon = document.getElementById('icon_' + id);
-    if (el.classList.contains('hidden')) { el.classList.remove('hidden'); icon.textContent = '📂'; }
-    else { el.classList.add('hidden'); icon.textContent = '📁'; }
+    const icon = document.getElementById('c_icon_fold_' + id);
+    if (el.classList.contains('hidden')) { 
+      el.classList.remove('hidden'); 
+      if (icon) icon.textContent = '📂'; 
+    }
+    else { 
+      el.classList.add('hidden'); 
+      if (icon) icon.textContent = '📁'; 
+    }
   };
 
-  // Chargement d'une couche unique
   window.loadCloudFileToMap = function (globalIndex) {
     try {
       const archive = cloudFilesStorage[globalIndex];
@@ -290,13 +297,14 @@
     } catch (e) { alert("Erreur lors de l'intégration de la couche."); }
   };
 
-  // Chargement en bloc de l'intégralité d'un dossier
   window.loadCloudFolderToMap = function (encodedFolderName) {
     const targetFolder = decodeURIComponent(encodedFolderName);
     let loadedCount = 0;
 
     cloudFilesStorage.forEach(archive => {
-      const fileFolder = archive.folder && archive.folder.trim() !== "" ? archive.folder.trim() : "Fichiers non classés";
+      const rawFolder = archive.folder || archive.Folder || "";
+      const fileFolder = rawFolder && String(rawFolder).trim() !== "" ? String(rawFolder).trim() : "Fichiers non classés";
+      
       if (fileFolder === targetFolder) {
         try {
           const geojson = typeof archive.geojsonRaw === 'string' ? JSON.parse(archive.geojsonRaw) : archive.geojsonRaw;
@@ -307,8 +315,8 @@
     });
 
     if (loadedCount > 0) {
-      fitMapBounds(); // Recadrage global unique une fois toutes les couches injectées
-      alert(`Dossier "${targetFolder}" : ${loadedCount} calques intégrés simultanément.`);
+      fitMapBounds();
+      alert(`Dossier "${targetFolder}" : ${loadedCount} calques intégrés.`);
     }
   };
 
