@@ -8,7 +8,7 @@
 
 (function () {
 
-  const GOOGLE_SCRIPT_URL = 'COLLE_ICI_L_URL_DE_TON_APPS_SCRIPT';
+  const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzasNFTAqeoHRVFB4XNThEIe8CgxdSPvp2uObMErkko3dogkBIUlScozk85HhvxnsHC/exec';
 
   /* ── Chargement de shpjs (shapefile → GeoJSON) ── */
   if (!window._shpjsLoaded) {
