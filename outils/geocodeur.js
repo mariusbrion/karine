@@ -5,7 +5,7 @@
  */
 
 (function () {
-  const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzasNFTAqeoHRVFB4XNThEIe8CgxdSPvp2uObMErkko3dogkBIUlScozk85HhvxnsHC/exec';
+  const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx3yvNTl-aFgd7kAaSc2kyETuMfeUqIn4j2hnvKEs6dpGs7jNo4vMIdTFIGhpSyJm6c/exec';
 
   // Chargement dynamique des dépendances
   if (!window.Papa) {
