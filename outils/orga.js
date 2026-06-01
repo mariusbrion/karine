@@ -21,7 +21,7 @@
     container.innerHTML = `
       <div class="text-center py-12">
         <div class="animate-spin rounded-full h-7 w-7 border-b-2 border-gray-900 mx-auto mb-3"></div>
-        <p class="text-xs text-gray-500">Synchronisation avec le catalogue Google Sheet...</p>
+        <p class="text-xs text-gray-500">Synchronisation active avec le catalogue Google Sheet...</p>
       </div>
     `;
 
@@ -50,7 +50,6 @@
       return;
     }
 
-    // Regroupement par dossier
     const groups = {};
     files.forEach(f => {
       const folderName = f.folder && f.folder.trim() !== "" ? f.folder.trim() : "Fichiers non classés";
@@ -75,7 +74,7 @@
                 </div>
                 
                 <div class="flex items-center gap-2">
-                  <button onclick="window.downloadFolderLot(${fIdx}, '${folderName}')" class="text-[10px] bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded hover:bg-gray-100 font-medium transition-colors" title="Télécharger tout le dossier fusionné">
+                  <button onclick="window.downloadFolderLot(${fIdx}, '${folderName}')" class="text-[10px] bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded hover:bg-gray-100 font-medium transition-colors">
                     📥 Tout télécharger
                   </button>
                 </div>
@@ -83,7 +82,6 @@
 
               <div id="fold_body_${fIdx}" class="divide-y divide-gray-100 hidden">
                 ${folderItems.map((file, fileIdx) => {
-                  // Génération d'un identifiant unique local basé sur les index
                   const uniqueId = `file_${fIdx}_${fileIdx}`;
                   return `
                     <div class="p-3 bg-white space-y-2" id="wrapper_${uniqueId}">
@@ -100,7 +98,7 @@
                         </div>
                       </div>
 
-                      <div id="edit_form_${uniqueId}" class="hidden bg-gray-50 border border-gray-200/80 rounded-xl p-3 space-y-2.5 animate-fadeUp">
+                      <div id="edit_form_${uniqueId}" class="hidden bg-gray-50 border border-gray-200/80 rounded-xl p-3 space-y-2.5">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <div>
                             <label class="block text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Nom du calque :</label>
@@ -108,12 +106,12 @@
                           </div>
                           <div>
                             <label class="block text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Dossier de rangement :</label>
-                            <input type="text" id="input_fold_${uniqueId}" value="${isUnclassified ? '' : folderName}" placeholder="Ex: Mobilité, Espaces Publics..." class="w-full p-1.5 border border-gray-200 bg-white rounded focus:outline-none focus:border-gray-400" />
+                            <input type="text" id="input_fold_${uniqueId}" value="${isUnclassified ? '' : folderName}" placeholder="Ex: Mobilité, Enquêtes..." class="w-full p-1.5 border border-gray-200 bg-white rounded focus:outline-none focus:border-gray-400" />
                           </div>
                         </div>
                         <div class="flex justify-end gap-2 text-[10px]">
                           <button onclick="window.closeInlineEdit('${uniqueId}')" class="text-gray-500 hover:underline px-2">Annuler</button>
-                          <button onclick="window.submitEditCloud('${uniqueId}', ${fIdx}, ${fileIdx})" class="bg-gray-900 text-white px-3 py-1 rounded font-medium hover:bg-gray-800">Sauvegarder les mutations</button>
+                          <button onclick="window.submitEditCloud('${uniqueId}', ${fIdx}, ${fileIdx})" class="bg-gray-900 text-white px-3 py-1 rounded font-medium hover:bg-gray-800">Sauvegarder</button>
                         </div>
                       </div>
                     </div>
@@ -128,35 +126,21 @@
     `;
   }
 
-  // Toggle d'ouverture des dossiers
   window.toggleFolderDOM = function (id) {
     const el = document.getElementById(id);
     const icon = document.getElementById('icon_' + id);
-    if (el.classList.contains('hidden')) {
-      el.classList.remove('hidden');
-      icon.textContent = '📂';
-    } else {
-      el.classList.add('hidden');
-      icon.textContent = '📁';
-    }
+    if (el.classList.contains('hidden')) { el.classList.remove('hidden'); icon.textContent = '📂'; }
+    else { el.classList.add('hidden'); icon.textContent = '📁'; }
   };
 
-  // Gestion de l'édition en ligne (sans prompt)
-  window.openInlineEdit = function (uid) {
-    document.getElementById('edit_form_' + uid).classList.remove('hidden');
-  };
-  window.closeInlineEdit = function (uid) {
-    document.getElementById('edit_form_' + uid).classList.add('hidden');
-  };
+  window.openInlineEdit = function (uid) { document.getElementById('edit_form_' + uid).classList.remove('hidden'); };
+  window.closeInlineEdit = function (uid) { document.getElementById('edit_form_' + uid).classList.add('hidden'); };
 
-  // Envoi des mutations (Mutation de nom et/ou transfert de dossier)
   window.submitEditCloud = function (uid, folderIndex, fileIndex) {
-    // Reconstruction de la référence globale
     const groups = {};
     localFilesBackup.forEach(f => {
       const folderName = f.folder && f.folder.trim() !== "" ? f.folder.trim() : "Fichiers non classés";
-      if (!groups[folderName]) groups[folderName] = [];
-      groups[folderName].push(f);
+      if (!groups[folderName]) groups[folderName] = []; groups[folderName].push(f);
     });
 
     const folderKey = Object.keys(groups)[folderIndex];
@@ -167,13 +151,16 @@
 
     if (!newName) { alert("Le nom du fichier ne peut pas être vide."); return; }
 
-    const submitBtn = document.querySelector(`#edit_form_${uid} button[onclick*="submitEditCloud"]`);
-    submitBtn.disabled = true; submitBtn.textContent = 'Mise à jour...';
+    // Remplacement par un écran de verrouillage visuel pendant le délai de commit Google
+    container.innerHTML = `
+      <div class="text-center py-12">
+        <div class="animate-spin rounded-full h-7 w-7 border-b-2 border-gray-900 mx-auto mb-3"></div>
+        <p class="text-xs text-emerald-600 font-medium">Mutation prise en compte ! Alignement du serveur cloud...</p>
+      </div>
+    `;
 
     fetch(GOOGLE_SCRIPT_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'update',
         fileName: targetFile.fileName,
@@ -183,17 +170,15 @@
       })
     })
     .then(() => {
-      alert("Fichier mis à jour !");
-      fetchAndRenderOrga(); // Rechargement et synchronisation
+      // Temporisation forcée de 2000ms : laisse le temps à Google de consigner le changement avant le GET
+      setTimeout(fetchAndRenderOrga, 2000);
     })
-    .catch(err => { alert(err.message); submitBtn.disabled = false; submitBtn.textContent = 'Sauvegarder'; });
+    .catch(err => { alert(err.message); fetchAndRenderOrga(); });
   };
 
-  // Suppression physique d'un fichier du Google Sheet
   window.deleteFileCloud = function (uid) {
-    if (!confirm("Voulez-vous vraiment supprimer définitivement ce calque du cloud ? Cette action est irréversible.")) return;
+    if (!confirm("Supprimer définitivement ce calque de la base Cloud ?")) return;
 
-    // Analyse des index pour cibler l'objet
     const parts = uid.split('_');
     const fIdx = parseInt(parts[1]);
     const fileIdx = parseInt(parts[2]);
@@ -201,17 +186,21 @@
     const groups = {};
     localFilesBackup.forEach(f => {
       const folderName = f.folder && f.folder.trim() !== "" ? f.folder.trim() : "Fichiers non classés";
-      if (!groups[folderName]) groups[folderName] = [];
-      groups[folderName].push(f);
+      if (!groups[folderName]) groups[folderName] = []; groups[folderName].push(f);
     });
 
     const folderKey = Object.keys(groups)[fIdx];
     const targetFile = groups[folderKey][fileIdx];
 
+    container.innerHTML = `
+      <div class="text-center py-12">
+        <div class="animate-spin rounded-full h-7 w-7 border-b-2 border-gray-900 mx-auto mb-3"></div>
+        <p class="text-xs text-red-600 font-medium">Suppression transmise ! Réorganisation du catalogue en cours...</p>
+      </div>
+    `;
+
     fetch(GOOGLE_SCRIPT_URL, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'delete',
         fileName: targetFile.fileName,
@@ -219,85 +208,55 @@
       })
     })
     .then(() => {
-      alert("Calque effacé du cloud.");
-      fetchAndRenderOrga();
+      // Temporisation forcée de 2000ms pour parer la latence du commit Google
+      setTimeout(fetchAndRenderOrga, 2000);
     })
-    .catch(err => alert("Erreur lors de la suppression : " + err.message));
+    .catch(err => { alert(err.message); fetchAndRenderOrga(); });
   };
 
-  // Télécharger une couche unique GeoJSON
   window.downloadSingleFileCloud = function (uid) {
     const parts = uid.split('_');
     const fIdx = parseInt(parts[1]);
     const fileIdx = parseInt(parts[2]);
-
     const groups = {};
     localFilesBackup.forEach(f => {
       const folderName = f.folder && f.folder.trim() !== "" ? f.folder.trim() : "Fichiers non classés";
-      if (!groups[folderName]) groups[folderName] = [];
-      groups[folderName].push(f);
+      if (!groups[folderName]) groups[folderName] = []; groups[folderName].push(f);
     });
-
     const folderKey = Object.keys(groups)[fIdx];
     const targetFile = groups[folderKey][fileIdx];
-
     try {
       const parsed = typeof targetFile.geojsonRaw === 'string' ? JSON.parse(targetFile.geojsonRaw) : targetFile.geojsonRaw;
       triggerBlobDownload(parsed, targetFile.fileName);
-    } catch (e) { alert("Impossible de parser le GeoJSON de ce fichier."); }
+    } catch (e) { alert("Erreur de parsing."); }
   };
 
-  // Télécharger TOUT UN DOSSIER (Compilation et fusion en une FeatureCollection unique)
   window.downloadFolderLot = function (folderIndex, folderName) {
     const groups = {};
     localFilesBackup.forEach(f => {
       const name = f.folder && f.folder.trim() !== "" ? f.folder.trim() : "Fichiers non classés";
-      if (!groups[name]) groups[name] = [];
-      groups[name].push(f);
+      if (!groups[name]) groups[name] = []; groups[name].push(f);
     });
-
     const targetItems = groups[folderName];
     if (!targetItems || !targetItems.length) return;
-
     const consolidatedFeatures = [];
-
     targetItems.forEach(item => {
       try {
         const parsed = typeof item.geojsonRaw === 'string' ? JSON.parse(item.geojsonRaw) : item.geojsonRaw;
-        if (parsed.type === 'FeatureCollection' && parsed.features) {
-          consolidatedFeatures.push(...parsed.features);
-        } else if (parsed.type === 'Feature') {
-          consolidatedFeatures.push(parsed);
-        }
-      } catch (e) { console.warn(`Fichier sauté lors de la fusion : ${item.fileName}`); }
+        if (parsed.type === 'FeatureCollection' && parsed.features) consolidatedFeatures.push(...parsed.features);
+        else if (parsed.type === 'Feature') consolidatedFeatures.push(parsed);
+      } catch (e) {}
     });
-
-    if (consolidatedFeatures.length === 0) {
-      alert("Aucune entité géométrique valide n'a pu être consolidée pour ce dossier.");
-      return;
-    }
-
-    const mergedGeoJSON = {
-      type: "FeatureCollection",
-      folder_metadata: folderName,
-      features: consolidatedFeatures
-    };
-
-    triggerBlobDownload(mergedGeoJSON, `Dossier_${folderName.replace(/\s+/g, '_')}.geojson`);
+    if (!consolidatedFeatures.length) { alert("Aucune entité valide."); return; }
+    triggerBlobDownload({ type: "FeatureCollection", folder_metadata: folderName, features: consolidatedFeatures }, `Dossier_${folderName.replace(/\s+/g, '_')}.geojson`);
   };
 
   function triggerBlobDownload(jsonObj, filename) {
     const blob = new Blob([JSON.stringify(jsonObj, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename.endsWith('.geojson') ? filename : filename + '.geojson';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url;
+    a.download = filename.endsWith('.geojson') ? filename : filename + '.geojson';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   }
 
-  // Amorçage au chargement
-  setTimeout(() => {
-    window.initOrga();
-  }, 500);
-
+  setTimeout(() => { window.initOrga(); }, 500);
 })();
