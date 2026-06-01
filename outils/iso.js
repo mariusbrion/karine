@@ -363,5 +363,14 @@
     })
     .catch(err => { alert("Échec de l'export : " + err.message); sendBtn.disabled = false; });
   };
+  // Modifie uniquement la fin du fichier iso.js pour caler le timer à 500ms
+  setTimeout(() => {
+    window.initIso = function () {
+      accumulatedFeatures = [];
+      if (isoMapInstance) { isoMapInstance.remove(); isoMapInstance = null; }
+      buildIsoLayout();
+    };
+    window.initIso();
+  }, 500); // 500ms d'attente garantit que le conteneur a sa taille finale
 
 })();
