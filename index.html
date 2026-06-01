@@ -39,7 +39,7 @@
       transition: grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1);
     }
 
-    .tools-grid.expanded-1, .tools-grid.expanded-2 {
+    .tools-grid.expanded-1, .tools-grid.expanded-2, .tools-grid.expanded-3 {
       grid-template-columns: 1fr;
     }
 
@@ -84,6 +84,7 @@
     /* Hidden slots when grid is expanded */
     .tools-grid.expanded-1 #slot2, .tools-grid.expanded-1 #slot3, .tools-grid.expanded-1 #slot4 { display: none; }
     .tools-grid.expanded-2 #slot1, .tools-grid.expanded-2 #slot3, .tools-grid.expanded-2 #slot4 { display: none; }
+    .tools-grid.expanded-3 #slot1, .tools-grid.expanded-3 #slot2, .tools-grid.expanded-3 #slot4 { display: none; }
 
     .slot-card::after {
       content: '';
@@ -237,23 +238,23 @@
         </div>
       </div>
 
-<div class="slot-card anim-4" id="slot3" onclick="openSlot3(event)">
-  <div class="slot-default" id="slot3-default">
-    <div class="slot-icon">⏳</div>
-    <span class="slot-label">Calculer des isochrones<br>(Zones d'accessibilité)</span>
-  </div>
-  <div id="iso-panel" class="expanded-panel">
-    <div class="panel-header">
-      <span class="panel-title">Générateur d'isochrones (OpenRouteService)</span>
-      <button class="close-btn" onclick="closeSlot3(event)" title="Fermer">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round">
-          <line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/>
-        </svg>
-      </button>
-    </div>
-    <div id="iso-content" class="panel-content"></div>
-  </div>
-</div>
+      <div class="slot-card anim-4" id="slot3" onclick="openSlot3(event)">
+        <div class="slot-default" id="slot3-default">
+          <div class="slot-icon">⏳</div>
+          <span class="slot-label">Calculer des isochrones<br>(Zones d'accessibilité)</span>
+        </div>
+        <div id="iso-panel" class="expanded-panel">
+          <div class="panel-header">
+            <span class="panel-title">Générateur d'isochrones (OpenRouteService)</span>
+            <button class="close-btn" onclick="closeSlot3(event)" title="Fermer">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round">
+                <line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/>
+              </svg>
+            </button>
+          </div>
+          <div id="iso-content" class="panel-content"></div>
+        </div>
+      </div>
 
       <div class="slot-card anim-5" id="slot4">
         <div class="slot-default">
@@ -279,15 +280,8 @@
     let slot2Open = false;
     let slot3Open = false;
 
-function openSlot3(e) {
-  if (slot1Open || slot2Open || slot3Open) return;
-  slot3Open = true;
-  const grid = document.getElementById('toolsGrid');
-  const card = document.getElementById('slot3');
-  const def = document.getElementById('slot3-default');
-
     function openSlot1(e) {
-      if (slot1Open || slot2Open) return;
+      if (slot1Open || slot2Open || slot3Open) return;
       slot1Open = true;
       const grid = document.getElementById('toolsGrid');
       const card = document.getElementById('slot1');
@@ -326,7 +320,7 @@ function openSlot3(e) {
     }
 
     function openSlot2(e) {
-      if (slot1Open || slot2Open) return;
+      if (slot1Open || slot2Open || slot3Open) return;
       slot2Open = true;
       const grid = document.getElementById('toolsGrid');
       const card = document.getElementById('slot2');
@@ -364,38 +358,44 @@ function openSlot3(e) {
       }, 320);
     }
 
-    const panel = document.getElementById('iso-panel');
-  grid.classList.add('expanded-1'); // Utilise la même classe d'expansion pleine largeur
-  card.classList.add('expanded');
-  def.style.display = 'none';
+    function openSlot3(e) {
+      if (slot1Open || slot2Open || slot3Open) return;
+      slot3Open = true;
+      const grid = document.getElementById('toolsGrid');
+      const card = document.getElementById('slot3');
+      const def = document.getElementById('slot3-default');
+      const panel = document.getElementById('iso-panel');
+      grid.classList.add('expanded-3');
+      card.classList.add('expanded');
+      def.style.display = 'none';
 
-  if (!document.getElementById('iso-js')) {
-    const script = document.createElement('script');
-    script.id = 'iso-js';
-    script.src = 'outils/iso.js';
-    document.body.appendChild(script);
-  } else if (typeof initIso === 'function') {
-    initIso();
-  }
-  panel.style.display = 'flex';
-  requestAnimationFrame(() => panel.classList.add('visible'));
-}
+      if (!document.getElementById('iso-js')) {
+        const script = document.createElement('script');
+        script.id = 'iso-js';
+        script.src = 'outils/iso.js';
+        document.body.appendChild(script);
+      } else if (typeof initIso === 'function') {
+        initIso();
+      }
+      panel.style.display = 'flex';
+      requestAnimationFrame(() => panel.classList.add('visible'));
+    }
 
-function closeSlot3(e) {
-  e.stopPropagation();
-  slot3Open = false;
-  const grid = document.getElementById('toolsGrid');
-  const card = document.getElementById('slot3');
-  const def = document.getElementById('slot3-default');
-  const panel = document.getElementById('iso-panel');
-  panel.classList.remove('visible');
-  setTimeout(() => {
-    panel.style.display = 'none';
-    grid.classList.remove('expanded-1');
-    card.classList.remove('expanded');
-    def.style.display = 'flex';
-  }, 320);
-}
+    function closeSlot3(e) {
+      e.stopPropagation();
+      slot3Open = false;
+      const grid = document.getElementById('toolsGrid');
+      const card = document.getElementById('slot3');
+      const def = document.getElementById('slot3-default');
+      const panel = document.getElementById('iso-panel');
+      panel.classList.remove('visible');
+      setTimeout(() => {
+        panel.style.display = 'none';
+        grid.classList.remove('expanded-3');
+        card.classList.remove('expanded');
+        def.style.display = 'flex';
+      }, 320);
+    }
   </script>
 </body>
 </html>
