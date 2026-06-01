@@ -6,7 +6,7 @@
  */
 
 (function () {
-  const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz1kvkUwAEwD-3Bc9SZqACaaZTVGhhGy_Om-F8vK0adfC5pBCg5amBNUEqSeteKJIrV/exec';
+  const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx3yvNTl-aFgd7kAaSc2kyETuMfeUqIn4j2hnvKEs6dpGs7jNo4vMIdTFIGhpSyJm6c/exec';
 
   // Décodage du token ORS obscurci en Base64
   const encodedKey = "NWIzY2UzNTk3ODUxMTEwMDAxY2Y2MjQ4ODNlMDMyZTkyZmMzNDdiMzlhOGI5MmZkOTM1NDYwMGU=";
