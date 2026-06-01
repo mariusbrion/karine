@@ -2,7 +2,7 @@
  * outils/iso.js
  * Générateur d'isochrones et d'isodistances basé sur l'API OpenRouteService (HeiGIT).
  * Gestion cumulative des entités géographiques et file d'attente sérialisée (4s).
- * Ajusté avec le nouveau domaine officiel api.heigit.org suite à la dépréciation.
+ * Intègre la nouvelle spécification POST CORS sur l'endpoint officiel d'HeiGIT.
  */
 
 (function () {
@@ -125,36 +125,27 @@
     document.getElementById('time-conversion-output').textContent = `Soit environ ${timeMinutes} minute${timeMinutes > 1 ? 's' : ''} de trajet`;
   };
 
-  // ── ROUTAGE SUR LE NOUVEL ENDPOINT OFFICIEL DE HEIGIT ──
-async function fetchIsochrone(lat, lng, distanceMeters, profile) {
-  const cleanLng = parseFloat(lng);
-  const cleanLat = parseFloat(lat);
-  const cleanDist = parseInt(distanceMeters);
+  // ── FONCTION EN METHODE POST INTEGRANT LA SPECIFICATION HEIGIT CORRECTE ──
+  async function fetchIsochrone(lat, lng, distanceMeters, profile) {
+    const cleanLng = parseFloat(lng);
+    const cleanLat = parseFloat(lat);
+    const cleanDist = parseInt(distanceMeters);
 
-  // ✅ Bon chemin : /openrouteservice/v2/
-  // ✅ POST + Authorization header (requis pour le CORS sur api.heigit.org)
-  const url = `https://api.heigit.org/openrouteservice/v2/isochrones/${profile}`;
+    const url = `https://api.heigit.org/openrouteservice/v2/isochrones/${profile}`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': apiKey,
-      'Accept': 'application/json, application/geo+json; charset=utf-8'
-    },
-    body: JSON.stringify({
-      locations: [[cleanLng, cleanLat]],
-      range: [cleanDist],
-      range_type: 'distance'
-    })
-  });
-
-  if (!response.ok) {
-    const errText = await response.text().catch(() => "Détails indisponibles");
-    throw new Error(`Erreur API HeiGIT (Code HTTP ${response.status}) : ${errText}`);
-  }
-  return await response.json();
-}
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': apiKey,
+        'Accept': 'application/json, application/geo+json; charset=utf-8'
+      },
+      body: JSON.stringify({
+        locations: [[cleanLng, cleanLat]],
+        range: [cleanDist],
+        range_type: 'distance'
+      })
+    });
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "Détails indisponibles");
