@@ -39,7 +39,8 @@
       transition: grid-template-columns 0.45s cubic-bezier(0.4,0,0.2,1);
     }
 
-    .tools-grid.expanded-1, .tools-grid.expanded-2, .tools-grid.expanded-3, .tools-grid.expanded-4, .tools-grid.expanded-5 {
+    .tools-grid.expanded-1, .tools-grid.expanded-2, .tools-grid.expanded-3, 
+    .tools-grid.expanded-4, .tools-grid.expanded-5, .tools-grid.expanded-6 {
       grid-template-columns: 1fr;
     }
 
@@ -79,28 +80,27 @@
       padding: 0;
     }
 
-    /* Slot 5 Specific thin look when minimized */
-    #slot5 {
-      min-height: 64px;
-      flex-direction: row;
-      justify-content: flex-start;
-      padding: 0 24px;
+    /* Format fin horizontal pour la derniere ligne (Slot 5 et Slot 6) */
+    .thin-slot {
+      min-height: 64px !important;
+      flex-direction: row !important;
+      justify-content: flex-start !important;
+      padding: 0 20px !important;
     }
 
-    #slot5.expanded {
-      min-height: 560px;
-      flex-direction: column;
-      padding: 0;
+    .thin-slot.expanded {
+      min-height: 560px !important;
+      flex-direction: column !important;
+      padding: 0 !important;
     }
-
-    .slot-card.expanded:hover { transform: none; }
 
     /* Hidden slots when grid is expanded */
-    .tools-grid.expanded-1 #slot2, .tools-grid.expanded-1 #slot3, .tools-grid.expanded-1 #slot4, .tools-grid.expanded-1 #slot5 { display: none; }
-    .tools-grid.expanded-2 #slot1, .tools-grid.expanded-2 #slot3, .tools-grid.expanded-2 #slot4, .tools-grid.expanded-2 #slot5 { display: none; }
-    .tools-grid.expanded-3 #slot1, .tools-grid.expanded-3 #slot2, .tools-grid.expanded-3 #slot4, .tools-grid.expanded-3 #slot5 { display: none; }
-    .tools-grid.expanded-4 #slot1, .tools-grid.expanded-4 #slot2, .tools-grid.expanded-4 #slot3, .tools-grid.expanded-4 #slot5 { display: none; }
-    .tools-grid.expanded-5 #slot1, .tools-grid.expanded-5 #slot2, .tools-grid.expanded-5 #slot3, .tools-grid.expanded-5 #slot4 { display: none; }
+    .tools-grid.expanded-1 #slot2, .tools-grid.expanded-1 #slot3, .tools-grid.expanded-1 #slot4, .tools-grid.expanded-1 #slot5, .tools-grid.expanded-1 #slot6 { display: none; }
+    .tools-grid.expanded-2 #slot1, .tools-grid.expanded-2 #slot3, .tools-grid.expanded-2 #slot4, .tools-grid.expanded-2 #slot5, .tools-grid.expanded-2 #slot6 { display: none; }
+    .tools-grid.expanded-3 #slot1, .tools-grid.expanded-3 #slot2, .tools-grid.expanded-3 #slot4, .tools-grid.expanded-3 #slot5, .tools-grid.expanded-3 #slot6 { display: none; }
+    .tools-grid.expanded-4 #slot1, .tools-grid.expanded-4 #slot2, .tools-grid.expanded-4 #slot3, .tools-grid.expanded-4 #slot5, .tools-grid.expanded-4 #slot6 { display: none; }
+    .tools-grid.expanded-5 #slot1, .tools-grid.expanded-5 #slot2, .tools-grid.expanded-5 #slot3, .tools-grid.expanded-5 #slot4, .tools-grid.expanded-5 #slot6 { display: none; }
+    .tools-grid.expanded-6 #slot1, .tools-grid.expanded-6 #slot2, .tools-grid.expanded-6 #slot3, .tools-grid.expanded-6 #slot4, .tools-grid.expanded-6 #slot5 { display: none; }
 
     .slot-card::after {
       content: '';
@@ -143,10 +143,7 @@
       transition: opacity 0.3s ease 0.2s;
     }
 
-    .expanded-panel.visible {
-      display: flex;
-      opacity: 1;
-    }
+    .expanded-panel.visible { display: flex; opacity: 1; }
 
     .panel-header {
       display: flex;
@@ -156,27 +153,12 @@
       border-bottom: 1px solid #F0F0EC;
     }
 
-    .panel-title {
-      font-family: 'DM Serif Display', serif;
-      font-size: 1.125rem;
-      color: #1a1a1a;
-    }
+    .panel-title { font-family: 'DM Serif Display', serif; font-size: 1.125rem; color: #1a1a1a; }
 
     .close-btn {
-      width: 28px;
-      height: 28px;
-      border-radius: 8px;
-      background: #F4F4F1;
-      border: none;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.2s;
-      position: relative;
-      z-index: 10;
+      width: 28px; height: 28px; border-radius: 8px; background: #F4F4F1; border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; transition: background 0.2s; position: relative; z-index: 10;
     }
-
     .close-btn:hover { background: #EAEAE6; }
     .panel-content { flex: 1; padding: 24px; overflow-y: auto; }
 
@@ -193,14 +175,7 @@
     .anim-5 { animation: fadeUp 0.55s 0.30s ease both; }
 
     .divider { width: 32px; height: 1px; background: #E0E0DC; margin: 0 auto; }
-    .badge {
-      font-size: 0.6875rem;
-      font-weight: 500;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #B8B8B0;
-    }
-
+    .badge { font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: #B8B8B0; }
     .slot-default { display: flex; flex-direction: column; align-items: center; gap: 12px; }
   </style>
 </head>
@@ -290,15 +265,14 @@
         </div>
       </div>
 
-      <div class="slot-card anim-5 col-span-2" id="slot5" onclick="openSlot5(event)">
-        <div class="slot-default !flex-row !gap-4 w-full" id="slot5-default">
-          <div class="slot-icon !w-9 !h-9 !text-base">🗂️</div>
-          <span class="slot-label !p-0 !text-left text-sm font-medium text-gray-800">Organiser mes fichiers cloud</span>
-          <span class="text-xs text-gray-400 ml-auto hidden sm:inline">Dossiers, renommage & nettoyage du catalogue →</span>
+      <div class="slot-card anim-5 thin-slot" id="slot5" onclick="openSlot5(event)">
+        <div class="slot-default !flex-row !gap-3 w-full" id="slot5-default">
+          <div class="slot-icon !w-8 !h-8 !text-sm">🗂️</div>
+          <span class="slot-label !p-0 !text-left font-medium text-gray-700">Organiser mes fichiers</span>
         </div>
         <div id="orga-panel" class="expanded-panel">
           <div class="panel-header">
-            <span class="panel-title">Gestionnaire & Organisateur de fichiers</span>
+            <span class="panel-title">Gestionnaire & Organisateur Cloud</span>
             <button class="close-btn" onclick="closeSlot5(event)" title="Fermer">
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round">
                 <line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/>
@@ -306,6 +280,24 @@
             </button>
           </div>
           <div id="orga-content" class="panel-content"></div>
+        </div>
+      </div>
+
+      <div class="slot-card anim-5 thin-slot" id="slot6" onclick="openSlot6(event)">
+        <div class="slot-default !flex-row !gap-3 w-full" id="slot6-default">
+          <div class="slot-icon !w-8 !h-8 !text-sm">📉</div>
+          <span class="slot-label !p-0 !text-left font-medium text-gray-700">FlowMapper (Flux & Trajets)</span>
+        </div>
+        <div id="trajet-panel" class="expanded-panel">
+          <div class="panel-header">
+            <span class="panel-title">FlowMapper — Visualisation des Flux</span>
+            <button class="close-btn" onclick="closeSlot6(event)" title="Fermer">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round">
+                <line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/>
+              </svg>
+            </button>
+          </div>
+          <div id="trajet-content" class="panel-content !p-0"></div>
         </div>
       </div>
 
@@ -318,10 +310,10 @@
   </div>
 
   <script>
-    let slot1Open = false; let slot2Open = false; let slot3Open = false; let slot4Open = false; let slot5Open = false;
+    let slot1Open = false; let slot2Open = false; let slot3Open = false; let slot4Open = false; let slot5Open = false; let slot6Open = false;
 
     function openSlot1(e) {
-      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open) return;
+      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open || slot6Open) return;
       slot1Open = true;
       const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot1');
       const def = document.getElementById('slot1-default'); const panel = document.getElementById('upload-panel');
@@ -340,7 +332,7 @@
     }
 
     function openSlot2(e) {
-      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open) return;
+      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open || slot6Open) return;
       slot2Open = true;
       const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot2');
       const def = document.getElementById('slot2-default'); const panel = document.getElementById('geocodeur-panel');
@@ -360,7 +352,7 @@
     }
 
     function openSlot3(e) {
-      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open) return;
+      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open || slot6Open) return;
       slot3Open = true;
       const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot3');
       const def = document.getElementById('slot3-default'); const panel = document.getElementById('iso-panel');
@@ -380,7 +372,7 @@
     }
 
     function openSlot4(e) {
-      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open) return;
+      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open || slot6Open) return;
       slot4Open = true;
       const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot4');
       const def = document.getElementById('slot4-default'); const panel = document.getElementById('display-panel');
@@ -400,7 +392,7 @@
     }
 
     function openSlot5(e) {
-      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open) return;
+      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open || slot6Open) return;
       slot5Open = true;
       const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot5');
       const def = document.getElementById('slot5-default'); const panel = document.getElementById('orga-panel');
@@ -417,6 +409,26 @@
       const def = document.getElementById('slot5-default'); const panel = document.getElementById('orga-panel');
       panel.classList.remove('visible');
       setTimeout(() => { panel.style.display = 'none'; grid.classList.remove('expanded-5'); card.classList.remove('expanded'); def.style.display = 'flex'; }, 320);
+    }
+
+    function openSlot6(e) {
+      if (slot1Open || slot2Open || slot3Open || slot4Open || slot5Open || slot6Open) return;
+      slot6Open = true;
+      const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot6');
+      const def = document.getElementById('slot6-default'); const panel = document.getElementById('trajet-panel');
+      grid.classList.add('expanded-6'); card.classList.add('expanded'); def.style.display = 'none';
+      panel.style.display = 'flex'; requestAnimationFrame(() => panel.classList.add('visible'));
+      if (!document.getElementById('trajet-js')) {
+        const script = document.createElement('script'); script.id = 'trajet-js'; script.src = 'outils/trajet.js';
+        script.onload = () => { if (typeof initTrajet === 'function') initTrajet(); }; document.body.appendChild(script);
+      } else if (typeof initTrajet === 'function') { initTrajet(); }
+    }
+    function closeSlot6(e) {
+      e.stopPropagation(); slot6Open = false;
+      const grid = document.getElementById('toolsGrid'); const card = document.getElementById('slot6');
+      const def = document.getElementById('slot6-default'); const panel = document.getElementById('trajet-panel');
+      panel.classList.remove('visible');
+      setTimeout(() => { panel.style.display = 'none'; grid.classList.remove('expanded-6'); card.classList.remove('expanded'); def.style.display = 'flex'; }, 320);
     }
   </script>
 </body>
