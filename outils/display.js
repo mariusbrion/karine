@@ -1,7 +1,8 @@
 /**
  * outils/display.js
  * Visualiseur cartographique multi-couches responsive avec édition de symbologie,
- * gestion dynamique des lignes de flux complexes et export PDF automatisé.
+ * gestion dynamique des lignes de flux complexes, synchronisation stricte des dossiers
+ * et moteur d'exportation PDF à mémoire d'aspect ratio (anti-déformation).
  */
 
 (function () {
@@ -47,12 +48,14 @@
   let mainMap = null;
   let layerControlList = []; 
   let cloudFilesStorage = [];
+  let cloudFolderKeys = []; // Permet le ciblage sécurisé par index des dossiers cloud
   const layerColors = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#6366F1', '#1a1a1a'];
   let colorIndex = 0;
 
   window.initDisplay = function () {
     layerControlList = [];
     cloudFilesStorage = [];
+    cloudFolderKeys = [];
     colorIndex = 0;
     if (mainMap) { mainMap.remove(); mainMap = null; }
     buildResponsiveLayout();
@@ -145,7 +148,6 @@
     const assignedColor = layerColors[colorIndex % layerColors.length];
     colorIndex++;
 
-    // Analyse préliminaire pour identifier s'il s'agit d'une couche "Ligne de Flux"
     let isFlux = false;
     let maxWeight = -Infinity;
     let minWeight = Infinity;
@@ -165,14 +167,12 @@
       });
     }
 
-    // Algorithme de calcul de la largeur proportionnelle (Rapport de 1 à 10 exigé)
     let computeFluxWidth = function (w) { return 2.0; };
     if (isFlux && maxWeight !== -Infinity) {
-      if (minWeight === Infinity || minWeight === maxWeight) minWeight = maxWeight * 0.1; // Fallback
-      const baseMin = 1.5; // Épaisseur de la plus petite ligne
+      if (minWeight === Infinity || minWeight === maxWeight) minWeight = maxWeight * 0.1;
+      const baseMin = 1.5;
       computeFluxWidth = function (w) {
         if (maxWeight === minWeight) return baseMin;
-        // Interpolation linéaire stricte pour garantir que le max = 10 fois le min
         return baseMin + (9 * baseMin) * ((w - minWeight) / (maxWeight - minWeight));
       };
     }
@@ -180,7 +180,6 @@
     let labelCounter = 0;
 
     const leafletGeoLayer = L.geoJSON(geojson, {
-      // Filtrage automatique des valeurs inférieures à 20% du maximum total
       filter: function(feature) {
         if (isFlux && maxWeight !== -Infinity && feature.properties && typeof feature.properties.weight !== 'undefined') {
           const w = parseFloat(feature.properties.weight);
@@ -201,7 +200,6 @@
         return { color: assignedColor, weight: 1.8, fillColor: assignedColor, fillOpacity: 0.15 };
       },
       onEachFeature: function (feature, layer) {
-        // Popups d'attributs standardisés
         if (feature.properties) {
           const description = Object.keys(feature.properties)
             .map(k => `<strong>${k}:</strong> ${feature.properties[k]}`)
@@ -209,7 +207,6 @@
           layer.bindPopup(`<div class="text-[10px] leading-snug font-sans max-h-36 overflow-y-auto">${description || 'Aucun attribut'}</div>`);
         }
 
-        // Placement intelligent des étiquettes de flux (skip 1 segment sur 3, priorité absolue à la max value)
         if (isFlux && feature.properties && typeof feature.properties.weight !== 'undefined' && typeof layer.getBounds === 'function') {
           const w = parseFloat(feature.properties.weight);
           let showLabel = false;
@@ -236,7 +233,7 @@
       id: 'layer_' + Date.now() + Math.random().toString(36).slice(2, 7),
       name: layerName,
       color: assignedColor,
-      weight: isFlux ? 2 : 1.8, // Valeur de base servant de multiplicateur pour le flux ou fixe pour le reste
+      weight: isFlux ? 2 : 1.8, 
       opacity: 0.85,
       isFlux: isFlux,
       maxWeight: maxWeight,
@@ -291,7 +288,6 @@
     `).join('');
   }
 
-  // Fonctions de contrôle de l'interface de style
   window.toggleLayerStyleConfig = function (id) {
     const panel = document.getElementById(`style-panel-${id}`);
     if (panel) panel.classList.toggle('hidden');
@@ -303,7 +299,6 @@
 
     if (property === 'color') {
       lyr.color = value;
-      // Met à jour les éléments vectoriels de base ainsi que les marqueurs de points potentiels
       lyr.leafletLayer.setStyle({ color: value, fillColor: value });
       lyr.leafletLayer.eachLayer(sub => { if (sub.setStyle) sub.setStyle({ color: value, fillColor: value }); });
     } 
@@ -311,7 +306,6 @@
       const numVal = parseFloat(value);
       lyr.weight = numVal;
       if (lyr.isFlux) {
-        // Applique l'épaisseur proportionnellement comme coefficient d'échelle globale
         lyr.leafletLayer.eachLayer(sub => {
           if (sub.feature && typeof sub.feature.properties.weight !== 'undefined' && sub.setStyle) {
             const w = parseFloat(sub.feature.properties.weight);
@@ -329,7 +323,6 @@
       lyr.leafletLayer.eachLayer(sub => { if (sub.setStyle) sub.setStyle({ opacity: numVal, fillOpacity: numVal * 0.85 }); });
     }
 
-    // Rafraîchissement direct de la pastille de couleur sans recréer le DOM (évite la perte de focus des sliders)
     const dot = document.querySelector(`.legend-color-dot-${id}`);
     if (dot) {
       dot.style.backgroundColor = lyr.color;
@@ -362,7 +355,7 @@
     if (bounds.isValid()) mainMap.fitBounds(bounds, { padding: [25, 25] });
   }
 
-  // ── MOTEUR D'EXPORTATION CARTOGRAPHIQUE PDF MULTI-COUCHES ──
+  // ── MOTEUR D'EXPORTATION PDF OPTIMISÉ (CONSERVATION STRICTE DU RATIO D'ASPECT) ──
   window.exportMapToPDF = function () {
     const btn = document.getElementById('disp-export-pdf-btn');
     const originalText = btn.textContent;
@@ -385,40 +378,46 @@
     Promise.all(loaders).then(() => {
       const mapElement = document.getElementById('leaflet-display-map');
 
-      // Capture de l'élément de carte Leaflet en tenant compte des configurations CORS des tuiles
       html2canvas(mapElement, {
         useCORS: true,
         allowTaint: false,
-        scale: 2, // Augmentation de la résolution pour un rendu propre à l'impression
+        scale: 2, 
         logging: false
       }).then(canvas => {
         const imgData = canvas.toDataURL('image/png');
         const { jsPDF } = window.jspdf;
         
-        // Création du document au format Paysage A4
         const pdf = new jsPDF('l', 'mm', 'a4');
         const pdfWidth = pdf.internal.pageSize.getWidth();
         const pdfHeight = pdf.internal.pageSize.getHeight();
 
-        // En-tête du document PDF
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(15);
         pdf.setTextColor(31, 41, 55);
-        pdf.text("Export Cartographique Officiel", 15, 15);
+        pdf.text("Export Cartographique", 15, 15);
         
         pdf.setFont("helvetica", "normal");
         pdf.setFontSize(8);
         pdf.setTextColor(107, 114, 128);
         pdf.text(`Généré le : ${new Date().toLocaleString()}`, 15, 20);
 
-        // Insertion et calcul de la taille de la carte capturée
-        const mapWidthMM = pdfWidth - 30; // Marges gauche/droite de 15mm
-        let mapHeightMM = (canvas.height * mapWidthMM) / canvas.width;
-        if (mapHeightMM > 115) mapHeightMM = 115; // Contrainte de hauteur max pour laisser de la place à la légende
+        // Algorithme anti-déformation homothétique strict (Garantit la superposition exacte)
+        const maxAvailableHeight = 115; 
+        let mapWidthMM = pdfWidth - 30; // Largeur par défaut basée sur les marges
+        let mapHeightMM = (canvas.height * mapWidthMM) / canvas.width; // Calcul proportionnel initial
 
-        pdf.addImage(imgData, 'PNG', 15, 24, mapWidthMM, mapHeightMM);
+        // Si la hauteur calculée sature la limite, on adapte la largeur pour garder le ratio intact
+        if (mapHeightMM > maxAvailableHeight) {
+          mapHeightMM = maxAvailableHeight;
+          mapWidthMM = (canvas.width * mapHeightMM) / canvas.height;
+        }
 
-        // Ajout de la Légende dynamique (uniquement les couches cochées visibles 👁️)
+        // Centrage de la carte sur l'axe X pour un rendu d'impression esthétique
+        const targetX = 15 + (pdfWidth - 30 - mapWidthMM) / 2;
+
+        pdf.addImage(imgData, 'PNG', targetX, 24, mapWidthMM, mapHeightMM);
+
+        // Génération de la légende dynamique
         let currentY = 24 + mapHeightMM + 12;
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(11);
@@ -436,23 +435,19 @@
         } else {
           pdf.setFontSize(9.5);
           visibleLayers.forEach(lyr => {
-            // Saut de page automatique si la liste des légendes dépasse la hauteur A4
             if (currentY > pdfHeight - 15) {
               pdf.addPage('l', 'mm', 'a4');
               currentY = 20;
             }
 
-            // Conversion Hex -> RGB pour jsPDF
             const hex = lyr.color.replace('#', '');
             const r = parseInt(hex.substring(0, 2), 16);
             const g = parseInt(hex.substring(2, 4), 16);
             const b = parseInt(hex.substring(4, 6), 16);
 
-            // Dessin du rectangle de couleur indicateur
             pdf.setFillColor(r, g, b);
             pdf.rect(15, currentY - 3.5, 4, 4, 'F');
 
-            // Intitulé et métadonnées de la couche
             pdf.setFont("helvetica", "normal");
             pdf.setTextColor(55, 65, 81);
             let metaTxt = lyr.name;
@@ -463,7 +458,6 @@
           });
         }
 
-        // Téléchargement du fichier PDF final
         pdf.save(`export_carto_${Date.now()}.pdf`);
         
         btn.disabled = false;
@@ -481,7 +475,7 @@
     });
   };
 
-  // ── SÉLECTION CLOUD PAR STRATE DE DOSSIERS INTERACTIFS (INALTERÉ) ──
+  // ── REPRISE DE LA LOGIQUE STRICTE DU FICHIER ORGA.JS POUR LE CATALOGUE CLOUD ──
   window.fetchDisplayCloud = function () {
     const btn = document.getElementById('disp-cloud-btn');
     btn.disabled = true; btn.textContent = 'Téléchargement de l\'arbre...';
@@ -495,13 +489,17 @@
         }
 
         cloudFilesStorage = files;
+
+        // Application de la formule exacte du fichier outils/orga.js (Colonne E)
         const groups = {};
-        files.forEach((f, globalIdx) => {
-          const rawFolder = f.folder || f.Folder || "";
-          const folderName = rawFolder && String(rawFolder).trim() !== "" ? String(rawFolder).trim() : "Fichiers non classés";
+        files.forEach(f => {
+          const folderName = f.folder && f.folder.trim() !== "" ? f.folder.trim() : "Fichiers non classés";
           if (!groups[folderName]) groups[folderName] = [];
-          groups[folderName].push({ data: f, index: globalIdx });
+          groups[folderName].push(f);
         });
+
+        // Stockage des clés globales ordonnées pour le ciblage par index sécurisé
+        cloudFolderKeys = Object.keys(groups);
 
         const parent = btn.parentNode;
         const selectorWrap = document.createElement('div');
@@ -514,31 +512,36 @@
             <button onclick="window.resetDisplayCloudBtn()" class="text-red-500 underline lowercase normal-case font-normal text-[11px]">Annuler</button>
           </div>
           <div class="space-y-1.5">
-            ${Object.keys(groups).map((folderName, fIdx) => {
-              const items = groups[folderName];
+            ${cloudFolderKeys.map((folderName, fIdx) => {
+              const folderItems = groups[folderName];
               return `
                 <div class="border border-gray-200 bg-white rounded-lg overflow-hidden">
                   <div class="flex items-center justify-between px-2.5 py-1.5 bg-gray-100/70 select-none">
                     <div class="flex items-center gap-1.5 cursor-pointer flex-1 min-w-0" onclick="window.toggleCloudDispFolderDOM('c_fold_${fIdx}')">
                       <span id="c_icon_fold_c_fold_${fIdx}">📁</span>
                       <span class="font-semibold text-gray-700 truncate text-[11px]">${folderName}</span>
+                      <span class="bg-gray-200 text-gray-600 px-1 py-0.2 rounded-full text-[9px] font-medium">${folderItems.length}</span>
                     </div>
-                    <button onclick="window.loadCloudFolderToMap('${encodeURIComponent(folderName)}')" class="text-[9px] bg-gray-900 text-white font-medium px-1.5 py-0.5 rounded hover:bg-gray-800 shrink-0 ml-1">
+                    <button onclick="window.loadCloudFolderToMap(${fIdx})" class="text-[9px] bg-gray-900 text-white font-medium px-1.5 py-0.5 rounded hover:bg-gray-800 shrink-0 ml-1">
                       ⚡ charger tout
                     </button>
                   </div>
                   <div id="c_fold_${fIdx}" class="divide-y divide-gray-50 hidden bg-white">
-                    ${items.map(item => `
-                      <div class="p-2 flex items-center justify-between gap-2 hover:bg-gray-50/60">
-                        <div class="min-w-0">
-                          <p class="font-medium text-gray-800 text-[10px] truncate" title="${item.data.fileName}">${item.data.fileName}</p>
-                          <p class="text-[9px] text-gray-400">${item.data.featureCount} entités</p>
+                    ${folderItems.map(item => {
+                      // Recherche de l'index d'origine dans le tableau plat cloudFilesStorage
+                      const globalIndex = cloudFilesStorage.findIndex(c => c.fileName === item.fileName && c.sentAt === item.sentAt);
+                      return `
+                        <div class="p-2 flex items-center justify-between gap-2 hover:bg-gray-50/60">
+                          <div class="min-w-0">
+                            <p class="font-medium text-gray-800 text-[10px] truncate" title="${item.fileName}">${item.fileName}</p>
+                            <p class="text-[9px] text-gray-400">${item.featureCount} entités</p>
+                          </div>
+                          <button onclick="window.loadCloudFileToMap(${globalIndex})" class="text-[10px] text-blue-600 font-medium hover:underline shrink-0">
+                            ➕ ajouter
+                          </button>
                         </div>
-                        <button onclick="window.loadCloudFileToMap(${item.index})" class="text-[10px] text-blue-600 font-medium hover:underline shrink-0">
-                          ➕ ajouter
-                        </button>
-                      </div>
-                    `).join('')}
+                      `;
+                    }).join('')}
                   </div>
                 </div>
               `;
@@ -565,6 +568,7 @@
   };
 
   window.loadCloudFileToMap = function (globalIndex) {
+    if (globalIndex === -1 || !cloudFilesStorage[globalIndex]) return;
     try {
       const archive = cloudFilesStorage[globalIndex];
       const geojson = typeof archive.geojsonRaw === 'string' ? JSON.parse(archive.geojsonRaw) : archive.geojsonRaw;
@@ -573,15 +577,16 @@
     } catch (e) { alert("Erreur lors de l'intégration de la couche."); }
   };
 
-  window.loadCloudFolderToMap = function (encodedFolderName) {
-    const targetFolder = decodeURIComponent(encodedFolderName);
-    let loadedCount = 0;
+  window.loadCloudFolderToMap = function (folderIndex) {
+    const targetFolder = cloudFolderKeys[folderIndex];
+    if (!targetFolder) return;
 
+    let loadedCount = 0;
     cloudFilesStorage.forEach(archive => {
-      const rawFolder = archive.folder || archive.Folder || "";
-      const fileFolder = rawFolder && String(rawFolder).trim() !== "" ? String(rawFolder).trim() : "Fichiers non classés";
+      // Même formule logique rigoureuse de vérification de dossier
+      const currentFolder = archive.folder && archive.folder.trim() !== "" ? archive.folder.trim() : "Fichiers non classés";
       
-      if (fileFolder === targetFolder) {
+      if (currentFolder === targetFolder) {
         try {
           const geojson = typeof archive.geojsonRaw === 'string' ? JSON.parse(archive.geojsonRaw) : archive.geojsonRaw;
           injectGeoJsonLayer(geojson, archive.fileName);
