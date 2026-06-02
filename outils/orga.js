@@ -74,8 +74,11 @@
                 </div>
                 
                 <div class="flex items-center gap-2">
-                  <button onclick="window.downloadFolderLot(${fIdx}, '${folderName}')" class="text-[10px] bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded hover:bg-gray-100 font-medium transition-colors">
+                  <button onclick="window.downloadFolderLot(${fIdx}, '${folderName.replace(/'/g, "\\'")}')" class="text-[10px] bg-white border border-gray-200 text-gray-600 px-2 py-1 rounded hover:bg-gray-100 font-medium transition-colors">
                     📥 Tout télécharger
+                  </button>
+                  <button onclick="window.deleteFolderCloud(${fIdx}, '${folderName.replace(/'/g, "\\'")}')" class="text-[10px] bg-red-50 border border-red-200 text-red-600 px-2 py-1 rounded hover:bg-red-100 font-medium transition-colors">
+                    🗑️ Supprimer le dossier
                   </button>
                 </div>
               </div>
@@ -151,7 +154,6 @@
 
     if (!newName) { alert("Le nom du fichier ne peut pas être vide."); return; }
 
-    // Remplacement par un écran de verrouillage visuel pendant le délai de commit Google
     container.innerHTML = `
       <div class="text-center py-12">
         <div class="animate-spin rounded-full h-7 w-7 border-b-2 border-gray-900 mx-auto mb-3"></div>
@@ -170,7 +172,6 @@
       })
     })
     .then(() => {
-      // Temporisation forcée de 2000ms : laisse le temps à Google de consigner le changement avant le GET
       setTimeout(fetchAndRenderOrga, 2000);
     })
     .catch(err => { alert(err.message); fetchAndRenderOrga(); });
@@ -208,10 +209,56 @@
       })
     })
     .then(() => {
-      // Temporisation forcée de 2000ms pour parer la latence du commit Google
       setTimeout(fetchAndRenderOrga, 2000);
     })
     .catch(err => { alert(err.message); fetchAndRenderOrga(); });
+  };
+
+  // ── NOUVELLE FONCTION : Suppression groupée par dossier ──────────────────
+  window.deleteFolderCloud = function (folderIndex, folderName) {
+    const groups = {};
+    localFilesBackup.forEach(f => {
+      const name = f.folder && f.folder.trim() !== "" ? f.folder.trim() : "Fichiers non classés";
+      if (!groups[name]) groups[name] = []; groups[name].push(f);
+    });
+
+    const targetItems = groups[folderName];
+    if (!targetItems || !targetItems.length) return;
+
+    if (!confirm(`⚠️ Êtes-vous sûr de vouloir supprimer TOUS les calques (${targetItems.length}) du dossier "${folderName}" ?`)) return;
+
+    // Écran de verrouillage visuel global
+    container.innerHTML = `
+      <div class="text-center py-12">
+        <div class="animate-spin rounded-full h-7 w-7 border-b-2 border-gray-900 mx-auto mb-3"></div>
+        <p class="text-xs text-red-600 font-medium">Suppression du dossier en cours (${targetItems.length} éléments)...</p>
+      </div>
+    `;
+
+    // Création d'un tableau de promesses de requêtes de suppression
+    const deletePromises = targetItems.map(item => {
+      return fetch(GOOGLE_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete',
+          fileName: item.fileName,
+          sentAt: item.sentAt
+        })
+      });
+    });
+
+    // Exécution de toutes les suppressions en parallèle
+    Promise.all(deletePromises)
+      .then(() => {
+        // Temporisation forcée de 2500ms pour laisser le temps au commit Google Sheet multi-lignes de se stabiliser
+        setTimeout(fetchAndRenderOrga, 2500);
+      })
+      .catch(err => {
+        alert("Erreur lors de la suppression groupée : " + err.message);
+        fetchAndRenderOrga();
+      });
   };
 
   window.downloadSingleFileCloud = function (uid) {
