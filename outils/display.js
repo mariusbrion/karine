@@ -1,8 +1,8 @@
 /**
  * outils/display.js
  * Visualiseur cartographique multi-couches responsive propulsé par Deck.gl.
- * Supporte l'édition de symbologie, la gestion dynamique des lignes de flux complexes,
- * la synchronisation des dossiers Google Sheet et l'export PDF natif haute précision.
+ * Supporte l'édition de symbologie (lignes, polygones et rayon des points), la gestion
+ * dynamique des lignes de flux complexes (filtrage à 30%), l'arbre Cloud et l'export PDF.
  */
 
 (function () {
@@ -87,7 +87,43 @@
       container: 'deck-display-container',
       initialViewState: { longitude: 1.888334, latitude: 46.603354, zoom: 5.5, pitch: 0, bearing: 0 },
       controller: true,
-      glOptions: { preserveDrawingBuffer: true }, // Crucial pour l'extraction d'image
+      glOptions: { preserveDrawingBuffer: true },
+      
+      // Fermeture automatique de la popup d'infos si l'utilisateur déplace la carte
+      onViewStateChange: () => {
+        const popup = document.getElementById('deck-popup-info');
+        if (popup) popup.style.display = 'none';
+      },
+
+      // GESTIONNAIRE DE CLIC INTERACTIF POUR LES COUCHES GEOJSON
+      onClick: (info) => {
+        let popup = document.getElementById('deck-popup-info');
+        if (!popup) {
+          popup = document.createElement('div');
+          popup.id = 'deck-popup-info';
+          popup.className = 'absolute z-[600] bg-white p-3 rounded-xl border border-gray-200 shadow-xl text-[10px] leading-snug font-sans max-h-44 overflow-y-auto text-gray-800 min-w-[160px] pointer-events-auto';
+          document.getElementById('deck-display-container').appendChild(popup);
+        }
+
+        if (info && info.object && info.object.properties) {
+          const props = info.object.properties;
+          const description = Object.keys(props)
+            .map(k => `<strong>${k}:</strong> ${props[k]}`)
+            .join('<br/>');
+
+          popup.innerHTML = `
+            <div class="relative pt-2">
+              <button onclick="document.getElementById('deck-popup-info').style.display='none'" class="absolute -top-1 right-0 text-gray-400 hover:text-gray-600 font-bold text-xs">✕</button>
+              <div class="pr-3">${description || 'Aucun attribut disponible'}</div>
+            </div>
+          `;
+          popup.style.left = `${info.x + 10}px`;
+          popup.style.top = `${info.y + 10}px`;
+          popup.style.display = 'block';
+        } else {
+          popup.style.display = 'none';
+        }
+      },
       layers: []
     });
 
@@ -114,25 +150,25 @@
       })
     ];
 
-    // 2. Génération dynamique des couches GeoJSON et Textes associées
+    // 2. Génération dynamique des couches vectorielles et textuelles
     layerControlList.forEach(lyr => {
       if (!lyr.visible) return;
 
       const rgb = hexToRgb(lyr.color);
       const alpha = Math.round(lyr.opacity * 255);
 
-      // Filtrage des entités de flux (< 20% du maximum total requis)
+      // FILTRAGE DES ENTIÉS DE FLUX PASSÉ À 30% DU MAXIMUM DE LA COUCHE
       let featuresToRender = lyr.geojson.features || [];
       if (lyr.isFlux) {
         featuresToRender = featuresToRender.filter(f => {
           if (f.properties && typeof f.properties.weight !== 'undefined') {
-            return parseFloat(f.properties.weight) >= (0.2 * lyr.maxWeight);
+            return parseFloat(f.properties.weight) >= (0.3 * lyr.maxWeight);
           }
           return true;
         });
       }
 
-      // Ajout de la couche vectorielle principale
+      // Ajout de la couche vectorielle GeoJSON principal
       layers.push(new deck.GeoJsonLayer({
         id: `geojson-layer-${lyr.id}`,
         data: { type: "FeatureCollection", features: featuresToRender },
@@ -142,6 +178,8 @@
         lineWidthMinPixels: 1,
         getLineColor: [...rgb, alpha],
         getFillColor: [...rgb, Math.round(alpha * 0.3)],
+        
+        // Gestion de l'épaisseur des lignes et polylignes
         getLineWidth: f => {
           if (lyr.isFlux && f.properties && typeof f.properties.weight !== 'undefined') {
             const w = parseFloat(f.properties.weight);
@@ -149,11 +187,13 @@
           }
           return lyr.weight;
         },
-        getPointRadius: 6,
-        pointRadiusMinPixels: 5
+
+        // GESTION DU CURSEUR DYNAMIQUE APPLIQUÉ DIRECTEMENT SUR LE RAYON DU POINT (GROSSIR/RÉTRÉCIR)
+        getPointRadius: f => lyr.weight * 3, 
+        pointRadiusMinPixels: 2
       }));
 
-      // Ajout des étiquettes textuelles permanentes (Couche texte Deck.gl)
+      // Ajout des étiquettes textuelles de flux
       if (lyr.isFlux) {
         const textData = [];
         let labelCounter = 0;
@@ -178,7 +218,9 @@
                 midPos = coords[Math.floor(coords.length / 2)];
               } else if (f.geometry.type === 'MultiLineString' && coords.length) {
                 const firstLine = coords[0];
-                midPos = firstLine[Math.floor(firstLine.length / 2)];
+                if (firstLine && firstLine.length) {
+                  midPos = firstLine[Math.floor(firstLine.length / 2)];
+                }
               }
 
               if (midPos) {
@@ -197,7 +239,6 @@
           fontFamily: 'Arial, sans-serif',
           fontWeight: 'bold',
           getColor: [31, 41, 55, 255],
-          getPixelOffset: [0, 0],
           getAlignmentBaseline: 'center',
           getJustifyHorizontal: 'center',
           background: true,
@@ -319,7 +360,7 @@
             <input type="color" value="${lyr.color}" oninput="window.updateLayerSymbology('${lyr.id}', 'color', this.value)" class="w-full h-5 p-0 border-0 rounded cursor-pointer" />
           </div>
           <div>
-            <label class="block text-[8px] text-gray-400 font-medium uppercase">${lyr.isFlux ? 'Échelle' : 'Épaisseur'}</label>
+            <label class="block text-[8px] text-gray-400 font-medium uppercase">${lyr.isFlux ? 'Échelle' : 'Taille / Rayon'}</label>
             <input type="range" min="0.5" max="10" step="0.5" value="${lyr.weight}" oninput="window.updateLayerSymbology('${lyr.id}', 'weight', this.value)" class="w-full accent-gray-700" />
           </div>
           <div>
@@ -429,7 +470,6 @@
   };
 
   function executePDFRender(btn, originalText) {
-    // Capture de l'image du buffer WebGL natif : Aucun décalage ni distorsion possible
     const canvas = document.getElementById('deck-canvas');
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
     
@@ -484,7 +524,7 @@
     btn.disabled = false; btn.textContent = originalText;
   }
 
-  // ── SYNCHRONISATEUR DE DOSSIERS INTERACTIFS CLOUD (LOGIQUE DE CATALOGUE COPIE CONFORME) ──
+  // ── SYNCHRONISATEUR DE DOSSIERS CLOUD INTERACTIFS (LOGIQUE COPIE CONFORME ORGA.JS) ──
   window.fetchDisplayCloud = function () {
     const btn = document.getElementById('disp-cloud-btn');
     btn.disabled = true; btn.textContent = 'Téléchargement de l\'arbre...';
