@@ -1,7 +1,7 @@
 /**
  * outils/trajet.js
  * FlowMapper — Analyseur et consolidateur de flux vers pôle d'attraction.
- * Intègre la file d'attente de requêtage HeiGIT (1.5s) et la synchronisation Google Sheets.
+ * Calcule dynamiquement les itinéraires depuis des points locaux (Fichiers) ou distants (Cloud).
  */
 
 (function () {
@@ -88,7 +88,7 @@
           </div>
 
           <div class="border-t border-gray-200 pt-2 space-y-1.5">
-            <button id="traj-cloud-btn" onclick="window.fetchTrajetCloud()" class="w-full bg-white border border-gray-200 text-gray-700 font-medium py-1.5 rounded-xl hover:bg-gray-50 text-[11px]">☁️ Charger Flux Cloud</button>
+            <button id="traj-cloud-btn" onclick="window.fetchTrajetCloud()" class="w-full bg-white border border-gray-200 text-gray-700 font-medium py-1.5 rounded-xl hover:bg-gray-50 text-[11px]">☁️ Calculer depuis le Cloud Sheets</button>
             <div id="traj-cloud-picker-wrap" class="hidden"></div>
           </div>
 
@@ -103,7 +103,7 @@
           </div>
 
           <div class="border-t border-gray-200 pt-2 space-y-1.5 shrink-0">
-            <button id="btnExportSheet" disabled onclick="window.exportTrajetToCloud()" class="w-full bg-gray-900 text-white font-medium py-1.5 rounded-xl hover:bg-gray-800 text-[11px]">☁️ Exporter vers le Cloud Sheets →</button>
+            <button id="btnExportSheet" disabled onclick="window.exportTrajetToCloud()" class="w-full bg-gray-900 text-white font-medium py-1.5 rounded-xl hover:bg-gray-800 text-[11px]">☁️ Archiver le résultat consolidé →</button>
             <button onclick="window.clearAllTrajets()" class="w-full text-red-500 hover:underline text-[10px] text-center block">Réinitialiser l'espace</button>
           </div>
         </div>
@@ -148,31 +148,8 @@
     }
   };
 
-  async function handleMapClick(e) {
-    if (isSettingDestination) {
-      destinationLatLng = e.latlng;
-      if (destinationMarker) fMap.removeLayer(destinationMarker);
-      destinationMarker = L.marker(e.latlng, {
-        icon: L.divIcon({
-          className: 'bg-none',
-          html: `<div class="bg-blue-600 w-8 h-8 rounded-full border-2 border-white shadow-md flex items-center justify-center text-sm">🎯</div>`,
-          iconSize: [32, 32], iconAnchor: [16, 16]
-        })
-      }).addTo(fMap);
-      window.toggleFlowDestinationMode();
-      return;
-    }
-
-    if (!destinationLatLng) { alert("Définissez d'abord le pôle d'arrivée (bouton bleu)."); return; }
-    const count = parseInt(document.getElementById('peopleCount').value) || 10;
-    const mode = document.getElementById('travelMode').value;
-    
-    await addTrip(e.latlng, count, mode);
-  }
-
   async function addTrip(startLatLng, weight, mode, skipRender = false) {
     try {
-      // Endpoint HeiGIT officiel conforme POST CORS
       const url = `https://api.heigit.org/openrouteservice/v2/directions/${mode}/geojson`;
       const response = await fetch(url, {
         method: 'POST',
@@ -180,7 +157,7 @@
         body: JSON.stringify({ coordinates: [[startLatLng.lng, startLatLng.lat], [destinationLatLng.lng, destinationLatLng.lat]] })
       });
 
-      if (!response.ok) throw new Error("Erreur serveur itinéraire.");
+      if (!response.ok) throw new Error("Erreur itinéraire.");
       const data = await response.json();
       const route = data.features[0];
       if (!route) return;
@@ -212,7 +189,7 @@
 
   window.handleTrajFileUpload = function (e) {
     const file = e.target.files[0];
-    if (!file || !destinationLatLng) { alert("Configurez l'arrivée avant l'import."); return; }
+    if (!file || !destinationLatLng) { alert("Configurez la destination finale avant d'importer."); return; }
 
     const reader = new FileReader();
     reader.onload = async (ev) => {
@@ -226,15 +203,27 @@
         });
       } else {
         const json = JSON.parse(ev.target.result);
-        const features = json.features || (json.type === 'Feature' ? [json] : []);
-        features.forEach(f => {
-          if (f.geometry?.type === 'Point') points.push({ lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0], weight: f.properties?.weight || f.properties?.count || 1 });
-        });
+        points = extractPointsFromGeoJSON(json);
       }
       if (points.length > 0) await processPointsInBulk(points);
     };
     reader.readAsText(file);
   };
+
+  function extractPointsFromGeoJSON(json) {
+    const points = [];
+    const features = json.features || (json.type === 'Feature' ? [json] : []);
+    features.forEach(f => {
+      if (f.geometry?.type === 'Point') {
+        points.push({
+          lat: f.geometry.coordinates[1],
+          lng: f.geometry.coordinates[0],
+          weight: f.properties?.weight || f.properties?.count || f.properties?.result_score || 1
+        });
+      }
+    });
+    return points;
+  }
 
   async function processPointsInBulk(points) {
     isProcessingBatch = true;
@@ -255,7 +244,6 @@
       percentText.innerText = progress + '%';
 
       if (i % 4 === 0 || i === total - 1) { renderFlow(); updateTripsList(); }
-      // Intervalle réglementaire anti-quota (1.5s)
       await new Promise(r => setTimeout(r, 1500));
     }
     isProcessingBatch = false;
@@ -283,7 +271,84 @@
     renderFlow();
   };
 
-  // ── GOOGLE SHEETS INTERACTION (EXPORT & IMPORT) ──
+  async function handleMapClick(e) {
+    if (isSettingDestination) {
+      destinationLatLng = e.latlng;
+      if (destinationMarker) fMap.removeLayer(destinationMarker);
+      destinationMarker = L.marker(e.latlng, {
+        icon: L.divIcon({
+          className: 'bg-none',
+          html: `<div class="bg-blue-600 w-8 h-8 rounded-full border-2 border-white shadow-md flex items-center justify-center text-sm">🎯</div>`,
+          iconSize: [32, 32], iconAnchor: [16, 16]
+        })
+      }).addTo(fMap);
+      window.toggleFlowDestinationMode();
+      return;
+    }
+
+    if (!destinationLatLng) { alert("Définissez d'abord le pôle d'arrivée (bouton bleu)."); return; }
+    const count = parseInt(document.getElementById('peopleCount').value) || 10;
+    const mode = document.getElementById('travelMode').value;
+    await addTrip(e.latlng, count, mode);
+  }
+
+  // ── RECALIBRAGE : IMPORTATION ET INTERPRÉTATION DIRECTE DES POINTS CLOUD ──
+  window.fetchTrajetCloud = function () {
+    if (!destinationLatLng) { alert("Veuillez d'abord définir la destination cible (bouton bleu) sur la carte."); return; }
+    
+    const btn = document.getElementById('traj-cloud-btn');
+    const wrap = document.getElementById('traj-cloud-picker-wrap');
+    btn.disabled = true; btn.textContent = 'Synchronisation Cloud...';
+
+    fetch(GOOGLE_SCRIPT_URL)
+      .then(res => res.json())
+      .then(files => {
+        if (!files.length) { alert("Aucune couche disponible sur la feuille d'envoi."); window.resetTrajCloudBtn(); return; }
+        
+        cloudTrajetStorage = files;
+        wrap.innerHTML = `
+          <label class="block text-[9px] font-bold text-gray-400 uppercase mb-1">Sélectionner la couche d'origine :</label>
+          <select class="w-full p-1.5 bg-white border border-gray-300 rounded-lg mt-1 text-[11px]" onchange="window.injectCloudTrajet(this.value)">
+            <option value="">-- Choisir la couche de points --</option>
+            ${files.map((f, i) => `<option value="${i}">${f.fileName} (${f.sentAt})</option>`).join('')}
+          </select>
+          <button onclick="window.resetTrajCloudBtn()" class="text-[9px] text-gray-400 underline block mt-1 hover:text-gray-600">Fermer</button>
+        `;
+        wrap.classList.remove('hidden'); btn.classList.add('hidden');
+      }).catch(err => { alert(err.message); window.resetTrajCloudBtn(); });
+  };
+
+  window.injectCloudTrajet = function (index) {
+    if (index === "") return;
+    if (!destinationLatLng) { alert("Définissez le pôle d'arrivée avant de lancer le calcul."); window.resetTrajCloudBtn(); return; }
+    
+    try {
+      const archive = cloudTrajetStorage[parseInt(index)];
+      const geojson = typeof archive.geojsonRaw === 'string' ? JSON.parse(archive.geojsonRaw) : archive.geojsonRaw;
+      
+      // Extraction dynamique des entités "Point"
+      const extractedPoints = extractPointsFromGeoJSON(geojson);
+
+      if (extractedPoints.length === 0) {
+        alert("Aucun entité géométrique de type 'Point' (origine) n'a été trouvée dans ce fichier Cloud. Veuillez sélectionner une couche géocodée ou de points.");
+        return;
+      }
+
+      window.resetTrajCloudBtn();
+      
+      // Lancement immédiat de la file d'attente progressive de calcul d'itinéraire
+      processPointsInBulk(extractedPoints);
+      
+    } catch(e) { alert("Erreur de parsing géométrique ou de chargement du fichier."); }
+  };
+
+  window.resetTrajCloudBtn = function () {
+    const wrap = document.getElementById('traj-cloud-picker-wrap');
+    const btn = document.getElementById('traj-cloud-btn');
+    if (wrap) wrap.classList.add('hidden');
+    if (btn) { btn.classList.remove('hidden'); btn.disabled = false; btn.textContent = '☁️ Calculer depuis le Cloud Sheets'; }
+  };
+
   window.exportTrajetToCloud = function () {
     if (!trips.length) return;
     const btn = document.getElementById('btnExportSheet');
@@ -299,61 +364,13 @@
         sentAt: new Date().toLocaleString('fr-FR'),
         featureCount: features.length,
         geojsonRaw: JSON.stringify(geojson),
-        folder: "Trajets & Flux" // Classé par défaut dans ce dossier
+        folder: "Trajets & Flux"
       })
     })
     .then(() => {
       btn.textContent = '✓ Flux Archivé !';
-      setTimeout(() => { btn.disabled = false; btn.textContent = '☁️ Exporter vers le Cloud Sheets →'; }, 2500);
+      setTimeout(() => { btn.disabled = false; btn.textContent = '☁️ Archiver le résultat de flux →'; }, 2500);
     }).catch(err => { alert(err.message); btn.disabled = false; });
-  };
-
-  window.fetchTrajetCloud = function () {
-    const btn = document.getElementById('traj-cloud-btn');
-    const wrap = document.getElementById('traj-cloud-picker-wrap');
-    btn.disabled = true; btn.textContent = 'Chargement...';
-
-    fetch(GOOGLE_SCRIPT_URL)
-      .then(res => res.json())
-      .then(files => {
-        // Filtrer uniquement pour afficher les calculs de flux
-        const flowFiles = files.filter(f => f.fileName.includes('Flux_FlowMapper') || f.folder === "Trajets & Flux");
-        if (!flowFiles.length) { alert("Aucune trace de flux trouvée sur Sheets."); window.resetTrajCloudBtn(); return; }
-        
-        cloudTrajetStorage = flowFiles;
-        wrap.innerHTML = `
-          <select class="w-full p-1 border border-gray-300 rounded mt-1 text-[11px]" onchange="window.injectCloudTrajet(this.value)">
-            <option value="">-- Choisir un flux --</option>
-            ${flowFiles.map((f, i) => `<option value="${i}">${f.fileName} (${f.sentAt})</option>`).join('')}
-          </select>
-          <button onclick="window.resetTrajCloudBtn()" class="text-[9px] text-gray-400 underline block mt-0.5">Fermer</button>
-        `;
-        wrap.classList.remove('hidden'); btn.classList.add('hidden');
-      }).catch(err => { alert(err.message); window.resetTrajCloudBtn(); });
-  };
-
-  window.injectCloudTrajet = function (index) {
-    if (index === "") return;
-    try {
-      const archive = cloudTrajetStorage[parseInt(index)];
-      const geojson = typeof archive.geojsonRaw === 'string' ? JSON.parse(archive.geojsonRaw) : archive.geojsonRaw;
-      
-      // Injecter la géométrie pré-calculée directement dans la couche visuelle
-      flowLayer.clearLayers().addData(geojson);
-      
-      // Réajustement des limites de zoom
-      if (geojson.features.length > 0) {
-        fMap.fitBounds(L.geoJSON(geojson).getBounds(), { padding: [30, 30] });
-      }
-      window.resetTrajCloudBtn();
-    } catch(e) { alert("Erreur de déploiement géométrique."); }
-  };
-
-  window.resetTrajCloudBtn = function () {
-    const wrap = document.getElementById('traj-cloud-picker-wrap');
-    const btn = document.getElementById('traj-cloud-btn');
-    if (wrap) wrap.classList.add('hidden');
-    if (btn) { btn.classList.remove('hidden'); btn.disabled = false; btn.textContent = '☁️ Charger Flux Cloud'; }
   };
 
   setTimeout(() => { window.initTrajet(); }, 500);
