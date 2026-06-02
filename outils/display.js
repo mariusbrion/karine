@@ -2,11 +2,10 @@
  * outils/display.js
  * Visualiseur cartographique multi-couches responsive avec édition de symbologie,
  * gestion dynamique des lignes de flux complexes, synchronisation stricte des dossiers
- * et moteur d'exportation JPEG centré sans déformation.
+ * et moteur d'exportation JPEG isolé par clone virtuel (correction de superposition).
  */
 
 (function () {
-  // Mise à jour avec l'URL exacte de votre module d'organisation
   const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyl132O-cCNrE5H4AVHE2F7pCWO3bzq_r3Tz-MK562sOkd52XyS8auIga0p8h5Rrjkh/exec';
 
   // ── INJECTION SÉCURISÉE DES REQUIS DE BASE (LEAFLET + STYLES DES ÉTIQUETTES) ──
@@ -49,7 +48,7 @@
   let mainMap = null;
   let layerControlList = []; 
   let cloudFilesStorage = [];
-  let cloudFolderKeys = []; // Permet le ciblage par index des dossiers cloud
+  let cloudFolderKeys = [];
   const layerColors = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#6366F1', '#1a1a1a'];
   let colorIndex = 0;
 
@@ -356,7 +355,7 @@
     if (bounds.isValid()) mainMap.fitBounds(bounds, { padding: [25, 25] });
   }
 
-  // ── LOGIQUE EXPORT PDF CORRIGÉE : CAPTURE JPEG CENTRÉE ET RESPECT HOMOTHÉTIQUE ──
+  // ── LOGIQUE EXPORT PDF RECOMPOSÉE : CLONE INVISIBLE ANTI-TRANSFORM 3D ET IMAGE CENTRÉE ──
   window.exportMapToPDF = function () {
     const btn = document.getElementById('disp-export-pdf-btn');
     const originalText = btn.textContent;
@@ -377,16 +376,45 @@
     if (!window.jspdf) loaders.push(loadDependency('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'));
 
     Promise.all(loaders).then(() => {
-      // Ciblage strict du carré de la carte Leaflet
       const mapElement = document.getElementById('leaflet-display-map');
 
       html2canvas(mapElement, {
         useCORS: true,
         allowTaint: false,
         scale: 2, 
-        logging: false
+        logging: false,
+        // INTERCEPTION DANS UN CLONE INVISIBLE AVANT CONVERSION GRAPHIQUE
+        onclone: function (clonedDoc) {
+          const clonedMap = clonedDoc.getElementById('leaflet-display-map');
+          if (!clonedMap) return;
+
+          // Conversion de l'enveloppe globale CSS translate3d en coordonnées standards top/left
+          const mapPane = clonedMap.querySelector('.leaflet-map-pane');
+          if (mapPane) {
+            const transform = window.getComputedStyle(mapPane).transform;
+            if (transform && transform !== 'none') {
+              const matrix = transform.match(/^matrix\((.+)\)$/);
+              if (matrix) {
+                const values = matrix[1].split(', ');
+                const x = parseFloat(values[4]);
+                const y = parseFloat(values[5]);
+                
+                mapPane.style.transform = 'none';
+                mapPane.style.left = (parseFloat(mapPane.style.left || 0) + x) + 'px';
+                mapPane.style.top = (parseFloat(mapPane.style.top || 0) + y) + 'px';
+              }
+            }
+          }
+
+          // Forcer la visibilité et l'opacité à 100% sur le conteneur des étiquettes textuelles
+          const tooltips = clonedMap.querySelectorAll('.leaflet-tooltip-pane .leaflet-tooltip');
+          tooltips.forEach(tooltip => {
+            tooltip.style.opacity = '1';
+            tooltip.style.visibility = 'visible';
+          });
+        }
       }).then(canvas => {
-        // Encodage propre en JPEG
+        // Encodage strict en JPEG
         const imgData = canvas.toDataURL('image/jpeg', 0.95);
         const { jsPDF } = window.jspdf;
         
@@ -394,7 +422,7 @@
         const pdfWidth = pdf.internal.pageSize.getWidth(); // 297mm
         const pdfHeight = pdf.internal.pageSize.getHeight(); // 210mm
 
-        // Titre du PDF
+        // En-tête textuel
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(14);
         pdf.setTextColor(31, 41, 55);
@@ -405,25 +433,24 @@
         pdf.setTextColor(107, 114, 128);
         pdf.text(`Généré le : ${new Date().toLocaleString()}`, 15, 20);
 
-        // Calcul d'aspect ratio strict pour éviter toute déformation du JPEG
+        // Calcul d'aspect ratio strict basé sur le canvas pour éviter les étirements
         const canvasRatio = canvas.width / canvas.height;
-        let mapWidthMM = pdfWidth - 30; // Largeur max disponible (267mm)
+        let mapWidthMM = pdfWidth - 30; // Marges de 15mm de chaque côté
         let mapHeightMM = mapWidthMM / canvasRatio;
 
-        // Si la hauteur dépasse la zone limite (pour garder de la place pour la légende)
-        if (mapHeightMM > 120) {
-          mapHeightMM = 120;
+        // Limite verticale stricte pour réserver l'espace du bas à la légende
+        if (mapHeightMM > 118) {
+          mapHeightMM = 118;
           mapWidthMM = mapHeightMM * canvasRatio;
         }
 
-        // Centrage parfait horizontal et calage vertical à 24mm
+        // Alignement horizontal et vertical au milieu de la feuille
         const posX = (pdfWidth - mapWidthMM) / 2;
         const posY = 24;
 
-        // Insertion du JPEG au milieu
         pdf.addImage(imgData, 'JPEG', posX, posY, mapWidthMM, mapHeightMM);
 
-        // Intégration de la légende en bas de la carte
+        // Légende dynamique des couches cochées
         let currentY = posY + mapHeightMM + 12;
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(11);
@@ -480,7 +507,7 @@
     });
   };
 
-  // ── HARMONISATION ET REPRISE DE LA LOGIQUE STRICTE DU DOSSIER ORGA.JS ──
+  // ── LOGIQUE CLOUD ET EXTRACTION DU DOSSIER HARMONISÉE DEPUIS L'URL EXACTE ──
   window.fetchDisplayCloud = function () {
     const btn = document.getElementById('disp-cloud-btn');
     btn.disabled = true; btn.textContent = 'Téléchargement de l\'arbre...';
@@ -495,7 +522,6 @@
 
         cloudFilesStorage = files;
 
-        // Tri et groupement de dossiers : Copie conforme de la logique outils/orga.js
         const groups = {};
         files.forEach(f => {
           const folderName = f.folder && f.folder.trim() !== "" ? f.folder.trim() : "Fichiers non classés";
@@ -524,7 +550,7 @@
                     <div class="flex items-center gap-1.5 cursor-pointer flex-1 min-w-0" onclick="window.toggleCloudDispFolderDOM('c_fold_${fIdx}')">
                       <span id="c_icon_fold_c_fold_${fIdx}">📁</span>
                       <span class="font-semibold text-gray-700 truncate text-[11px]">${folderName}</span>
-                      <span class="bg-gray-200 text-gray-600 px-1.5 py-0.2 rounded-full text-[9px] font-medium">${folderItems.length}</span>
+                      <span class="bg-gray-200 text-gray-600 px-1 py-0.2 rounded-full text-[9px] font-medium">${folderItems.length}</span>
                     </div>
                     <button onclick="window.loadCloudFolderToMap(${fIdx})" class="text-[9px] bg-gray-900 text-white font-medium px-1.5 py-0.5 rounded hover:bg-gray-800 shrink-0 ml-1">
                       ⚡ charger tout
