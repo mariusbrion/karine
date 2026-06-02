@@ -1,44 +1,18 @@
 /**
  * outils/display.js
- * Visualiseur cartographique multi-couches responsive avec édition de symbologie,
- * gestion dynamique des lignes de flux complexes, synchronisation stricte des dossiers
- * et moteur d'exportation PDF par aplatissement de matrice 3D (Zéro décalage).
+ * Visualiseur cartographique multi-couches responsive propulsé par Deck.gl.
+ * Supporte l'édition de symbologie, la gestion dynamique des lignes de flux complexes,
+ * la synchronisation des dossiers Google Sheet et l'export PDF natif haute précision.
  */
 
 (function () {
   const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyl132O-cCNrE5H4AVHE2F7pCWO3bzq_r3Tz-MK562sOkd52XyS8auIga0p8h5Rrjkh/exec';
 
-  // ── INJECTION SÉCURISÉE DES REQUIS DE BASE (LEAFLET + STYLES DES ÉTIQUETTES) ──
-  if (!document.getElementById('leaflet-css')) {
-    const l = document.createElement('link');
-    l.id = 'leaflet-css';
-    l.rel = 'stylesheet';
-    l.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    document.head.appendChild(l);
-  }
-  if (!window.L) {
+  // ── INJECTION SÉCURISÉE DE DECK.GL (VERSION STANDALONE STABLE) ──
+  if (!window.deck) {
     const s = document.createElement('script');
-    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.src = 'https://unpkg.com/deck.gl@8.9.35/dist.min.js';
     document.head.appendChild(s);
-  }
-
-  if (!document.getElementById('flux-label-style')) {
-    const style = document.createElement('style');
-    style.id = 'flux-label-style';
-    style.innerHTML = `
-      .flux-polyline-label {
-        background: rgba(255, 255, 255, 0.95);
-        border: 1px solid #4B5563;
-        border-radius: 4px;
-        padding: 1px 4px;
-        font-size: 9px;
-        font-weight: bold;
-        color: #1F2937;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-        white-space: nowrap;
-      }
-    `;
-    document.head.appendChild(style);
   }
 
   const container = document.getElementById('display-content');
@@ -55,7 +29,7 @@
     layerControlList = [];
     cloudFilesStorage = [];
     colorIndex = 0;
-    if (mainMap) { mainMap.remove(); mainMap = null; }
+    if (mainMap) { mainMap.finalize(); mainMap = null; }
     buildResponsiveLayout();
   };
 
@@ -86,7 +60,9 @@
         </div>
 
         <div class="flex-1 h-full relative">
-          <div id="leaflet-display-map" class="w-full h-full bg-gray-100 z-10"></div>
+          <div id="deck-display-container" class="w-full h-full bg-gray-100 relative">
+            <canvas id="deck-canvas" class="w-full h-full z-10 block"></canvas>
+          </div>
           
           <button id="disp-export-pdf-btn" onclick="window.exportMapToPDF()" class="absolute bottom-4 right-4 z-[500] bg-red-600 text-white font-semibold px-3 py-2 rounded-xl shadow-lg hover:bg-red-700 transition-all flex items-center gap-1.5 text-[11px]">
             📄 Export PDF
@@ -97,22 +73,141 @@
     `;
 
     setTimeout(() => {
-      initLeafletDisplay();
+      initDeckGLDisplay();
       setupDisplayDrop();
     }, 550);
   }
 
-  function initLeafletDisplay() {
+  function initDeckGLDisplay() {
     if (mainMap) return;
-    if (!window.L) { setTimeout(initLeafletDisplay, 100); return; }
+    if (!window.deck) { setTimeout(initDeckGLDisplay, 100); return; }
 
-    mainMap = L.map('leaflet-display-map').setView([46.603354, 1.888334], 6);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: '© OpenStreetMap',
-      crossOrigin: true
-    }).addTo(mainMap);
+    mainMap = new deck.DeckGL({
+      canvas: 'deck-canvas',
+      container: 'deck-display-container',
+      initialViewState: { longitude: 1.888334, latitude: 46.603354, zoom: 5.5, pitch: 0, bearing: 0 },
+      controller: true,
+      glOptions: { preserveDrawingBuffer: true }, // Crucial pour l'extraction d'image
+      layers: []
+    });
 
-    mainMap.invalidateSize();
+    updateDeckLayers();
+  }
+
+  // Moteur centralisé de rafraîchissement des couches Deck.gl
+  function updateDeckLayers() {
+    if (!mainMap) return;
+
+    // 1. Couche de base cartographique (Tuiles raster)
+    const layers = [
+      new deck.TileLayer({
+        id: 'base-tiles',
+        data: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+        renderSubLayers: props => {
+          const { bbox: { west, south, east, north } } = props.tile;
+          return new deck.BitmapLayer(props, {
+            data: null,
+            image: props.data,
+            bounds: [west, south, east, north]
+          });
+        }
+      })
+    ];
+
+    // 2. Génération dynamique des couches GeoJSON et Textes associées
+    layerControlList.forEach(lyr => {
+      if (!lyr.visible) return;
+
+      const rgb = hexToRgb(lyr.color);
+      const alpha = Math.round(lyr.opacity * 255);
+
+      // Filtrage des entités de flux (< 20% du maximum total requis)
+      let featuresToRender = lyr.geojson.features || [];
+      if (lyr.isFlux) {
+        featuresToRender = featuresToRender.filter(f => {
+          if (f.properties && typeof f.properties.weight !== 'undefined') {
+            return parseFloat(f.properties.weight) >= (0.2 * lyr.maxWeight);
+          }
+          return true;
+        });
+      }
+
+      // Ajout de la couche vectorielle principale
+      layers.push(new deck.GeoJsonLayer({
+        id: `geojson-layer-${lyr.id}`,
+        data: { type: "FeatureCollection", features: featuresToRender },
+        pickable: true,
+        stroked: true,
+        filled: true,
+        lineWidthMinPixels: 1,
+        getLineColor: [...rgb, alpha],
+        getFillColor: [...rgb, Math.round(alpha * 0.3)],
+        getLineWidth: f => {
+          if (lyr.isFlux && f.properties && typeof f.properties.weight !== 'undefined') {
+            const w = parseFloat(f.properties.weight);
+            return lyr.computeFluxWidth(w) * (lyr.weight / 2);
+          }
+          return lyr.weight;
+        },
+        getPointRadius: 6,
+        pointRadiusMinPixels: 5
+      }));
+
+      // Ajout des étiquettes textuelles permanentes (Couche texte Deck.gl)
+      if (lyr.isFlux) {
+        const textData = [];
+        let labelCounter = 0;
+
+        featuresToRender.forEach(f => {
+          if (f.properties && typeof f.properties.weight !== 'undefined') {
+            const w = parseFloat(f.properties.weight);
+            let showLabel = false;
+
+            if (w === lyr.maxWeight) {
+              showLabel = true;
+            } else {
+              labelCounter++;
+              if (labelCounter % 3 === 0) showLabel = true;
+            }
+
+            if (showLabel) {
+              const coords = f.geometry.coordinates;
+              let midPos = null;
+
+              if (f.geometry.type === 'LineString' && coords.length) {
+                midPos = coords[Math.floor(coords.length / 2)];
+              } else if (f.geometry.type === 'MultiLineString' && coords.length) {
+                const firstLine = coords[0];
+                midPos = firstLine[Math.floor(firstLine.length / 2)];
+              }
+
+              if (midPos) {
+                textData.push({ text: String(w), position: midPos });
+              }
+            }
+          }
+        });
+
+        layers.push(new deck.TextLayer({
+          id: `text-layer-${lyr.id}`,
+          data: textData,
+          getPosition: d => d.position,
+          getText: d => d.text,
+          getSize: 11,
+          fontFamily: 'Arial, sans-serif',
+          fontWeight: 'bold',
+          getColor: [31, 41, 55, 255],
+          getPixelOffset: [0, 0],
+          getAlignmentBaseline: 'center',
+          getJustifyHorizontal: 'center',
+          background: true,
+          getBackgroundColor: [255, 255, 255, 240],
+          backgroundPadding: [3, 1, 3, 1]
+        }));
+      }
+    });
+
+    mainMap.setProps({ layers });
   }
 
   function setupDisplayDrop() {
@@ -175,73 +270,23 @@
       };
     }
 
-    let labelCounter = 0;
-
-    const leafletGeoLayer = L.geoJSON(geojson, {
-      filter: function(feature) {
-        if (isFlux && maxWeight !== -Infinity && feature.properties && typeof feature.properties.weight !== 'undefined') {
-          const w = parseFloat(feature.properties.weight);
-          return w >= (0.2 * maxWeight);
-        }
-        return true;
-      },
-      pointToLayer: function (feature, latlng) {
-        return L.circleMarker(latlng, {
-          radius: 5.5, fillColor: assignedColor, color: '#ffffff', weight: 1.2, fillOpacity: 0.85
-        });
-      },
-      style: function (feature) {
-        if (isFlux && feature.properties && typeof feature.properties.weight !== 'undefined') {
-          const w = parseFloat(feature.properties.weight);
-          return { color: assignedColor, weight: computeFluxWidth(w), opacity: 0.85 };
-        }
-        return { color: assignedColor, weight: 1.8, fillColor: assignedColor, fillOpacity: 0.15 };
-      },
-      onEachFeature: function (feature, layer) {
-        if (feature.properties) {
-          const description = Object.keys(feature.properties)
-            .map(k => `<strong>${k}:</strong> ${feature.properties[k]}`)
-            .join('<br/>');
-          layer.bindPopup(`<div class="text-[10px] leading-snug font-sans max-h-36 overflow-y-auto">${description || 'Aucun attribut'}</div>`);
-        }
-
-        if (isFlux && feature.properties && typeof feature.properties.weight !== 'undefined' && typeof layer.getBounds === 'function') {
-          const w = parseFloat(feature.properties.weight);
-          let showLabel = false;
-
-          if (w === maxWeight) {
-            showLabel = true;
-          } else {
-            labelCounter++;
-            if (labelCounter % 3 === 0) showLabel = true;
-          }
-
-          if (showLabel) {
-            layer.bindTooltip(String(w), {
-              permanent: true,
-              direction: 'center',
-              className: 'flux-polyline-label'
-            });
-          }
-        }
-      }
-    }).addTo(mainMap);
-
     layerControlList.push({
       id: 'layer_' + Date.now() + Math.random().toString(36).slice(2, 7),
       name: layerName,
       color: assignedColor,
-      weight: isFlux ? 2 : 1.8, 
+      weight: isFlux ? 3 : 2, 
       opacity: 0.85,
       isFlux: isFlux,
       maxWeight: maxWeight,
       minWeight: minWeight,
       computeFluxWidth: computeFluxWidth,
-      leafletLayer: leafletGeoLayer,
+      geojson: geojson,
       visible: true
     });
 
     refreshLegendPanel();
+    updateDeckLayers();
+    fitMapBounds();
   }
 
   function refreshLegendPanel() {
@@ -295,231 +340,151 @@
     const lyr = layerControlList.find(l => l.id === id);
     if (!lyr) return;
 
-    if (property === 'color') {
-      lyr.color = value;
-      lyr.leafletLayer.setStyle({ color: value, fillColor: value });
-      lyr.leafletLayer.eachLayer(sub => { if (sub.setStyle) sub.setStyle({ color: value, fillColor: value }); });
-    } 
-    else if (property === 'weight') {
-      const numVal = parseFloat(value);
-      lyr.weight = numVal;
-      if (lyr.isFlux) {
-        lyr.leafletLayer.eachLayer(sub => {
-          if (sub.feature && typeof sub.feature.properties.weight !== 'undefined' && sub.setStyle) {
-            const w = parseFloat(sub.feature.properties.weight);
-            sub.setStyle({ weight: lyr.computeFluxWidth(w) * (numVal / 2) });
-          }
-        });
-      } else {
-        lyr.leafletLayer.setStyle({ weight: numVal });
-      }
-    } 
-    else if (property === 'opacity') {
-      const numVal = parseFloat(value);
-      lyr.opacity = numVal;
-      lyr.leafletLayer.setStyle({ opacity: numVal, fillOpacity: numVal * 0.4 });
-      lyr.leafletLayer.eachLayer(sub => { if (sub.setStyle) sub.setStyle({ opacity: numVal, fillOpacity: numVal * 0.85 }); });
-    }
+    if (property === 'color') lyr.color = value;
+    else if (property === 'weight') lyr.weight = parseFloat(value);
+    else if (property === 'opacity') lyr.opacity = parseFloat(value);
 
     const dot = document.querySelector(`.legend-color-dot-${id}`);
     if (dot) {
       dot.style.backgroundColor = lyr.color;
       dot.style.opacity = lyr.opacity;
     }
+
+    updateDeckLayers();
   };
 
   window.toggleLayerVisibility = function (id) {
     const lyr = layerControlList.find(l => l.id === id);
     if (!lyr) return;
-    if (lyr.visible) { mainMap.removeLayer(lyr.leafletLayer); lyr.visible = false; }
-    else { mainMap.addLayer(lyr.leafletLayer); lyr.visible = true; }
+    lyr.visible = !lyr.visible;
     refreshLegendPanel();
+    updateDeckLayers();
   };
 
   window.removeDisplayLayer = function (id) {
     const idx = layerControlList.findIndex(l => l.id === id);
     if (idx === -1) return;
-    mainMap.removeLayer(layerControlList[idx].leafletLayer);
     layerControlList.splice(idx, 1);
     refreshLegendPanel();
+    updateDeckLayers();
     fitMapBounds();
   };
 
   function fitMapBounds() {
     const activeLayers = layerControlList.filter(l => l.visible);
     if (activeLayers.length === 0) return;
-    const bounds = L.latLngBounds();
-    activeLayers.forEach(lyr => bounds.extend(lyr.leafletLayer.getBounds()));
-    if (bounds.isValid()) mainMap.fitBounds(bounds, { padding: [25, 25] });
+    
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let hasCoords = false;
+
+    activeLayers.forEach(lyr => {
+      const features = lyr.geojson.features || [];
+      features.forEach(f => {
+        if (!f.geometry) return;
+        const process = (arr) => {
+          if (typeof arr[0] === 'number') {
+            const [lon, lat] = arr;
+            if (lon < minX) minX = lon; if (lon > maxX) maxX = lon;
+            if (lat < minY) minY = lat; if (lat > maxY) maxY = lat;
+            hasCoords = true;
+          } else { arr.forEach(process); }
+        };
+        process(f.geometry.coordinates);
+      });
+    });
+
+    if (hasCoords && mainMap) {
+      const centerLon = (minX + maxX) / 2;
+      const centerLat = (minY + maxY) / 2;
+      const maxDiff = Math.max(Math.abs(maxY - minY), Math.abs(maxX - minX));
+      
+      let zoom = 11;
+      if (maxDiff > 30) zoom = 3;
+      else if (maxDiff > 12) zoom = 5;
+      else if (maxDiff > 5) zoom = 6.5;
+      else if (maxDiff > 2) zoom = 8;
+      else if (maxDiff > 0.5) zoom = 10;
+
+      mainMap.setProps({
+        initialViewState: { longitude: centerLon, latitude: centerLat, zoom: zoom, pitch: 0, bearing: 0, transitionDuration: 500 }
+      });
+    }
   }
 
-  // ── LOGIQUE EXPORT PDF EXCLUSIVE : ALGORITHME D'APLATISSEMENT DE COORDONNÉES 3D (ANTI-DÉCALAGE) ──
+  // ── LOGIQUE EXPORT PDF DIRECT RECOUVREMENT PARFAIT WEBGL SANS HTML2CANVAS ──
   window.exportMapToPDF = function () {
+    if (!mainMap) return;
     const btn = document.getElementById('disp-export-pdf-btn');
     const originalText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '⌛ Génération PDF...';
+    btn.disabled = true; btn.textContent = '⌛ Génération PDF...';
 
-    function loadDependency(url) {
-      return new Promise((resolve) => {
-        const script = document.createElement('script');
-        script.src = url;
-        script.onload = resolve;
-        document.head.appendChild(script);
+    if (!window.jspdf) {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+      script.onload = () => executePDFRender(btn, originalText);
+      document.head.appendChild(script);
+    } else {
+      executePDFRender(btn, originalText);
+    }
+  };
+
+  function executePDFRender(btn, originalText) {
+    // Capture de l'image du buffer WebGL natif : Aucun décalage ni distorsion possible
+    const canvas = document.getElementById('deck-canvas');
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF('l', 'mm', 'a4');
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(14); pdf.setTextColor(31, 41, 55);
+    pdf.text("Export Cartographique", 15, 15);
+    
+    pdf.setFont("helvetica", "normal"); pdf.setFontSize(8); pdf.setTextColor(107, 114, 128);
+    pdf.text(`Généré le : ${new Date().toLocaleString()}`, 15, 20);
+
+    const canvasRatio = canvas.width / canvas.height;
+    let mapWidthMM = pdfWidth - 30;
+    let mapHeightMM = mapWidthMM / canvasRatio;
+
+    if (mapHeightMM > 118) {
+      mapHeightMM = 118; mapWidthMM = mapHeightMM * canvasRatio;
+    }
+
+    const posX = (pdfWidth - mapWidthMM) / 2;
+    pdf.addImage(imgData, 'JPEG', posX, 24, mapWidthMM, mapHeightMM);
+
+    let currentY = 24 + mapHeightMM + 12;
+    pdf.setFont("helvetica", "bold"); pdf.setFontSize(11); pdf.setTextColor(31, 41, 55);
+    pdf.text("Légende des couches visibles", 15, currentY);
+    currentY += 6;
+
+    const visibleLayers = layerControlList.filter(l => l.visible);
+    if (visibleLayers.length === 0) {
+      pdf.setFont("helvetica", "italic"); pdf.setFontSize(9); pdf.setTextColor(156, 163, 175);
+      pdf.text("Aucune couche active visible.", 15, currentY);
+    } else {
+      pdf.setFontSize(9.5);
+      visibleLayers.forEach(lyr => {
+        if (currentY > pdfHeight - 15) { pdf.addPage('l', 'mm', 'a4'); currentY = 20; }
+        const rgb = hexToRgb(lyr.color);
+        pdf.setFillColor(rgb[0], rgb[1], rgb[2]);
+        pdf.rect(15, currentY - 3.5, 4, 4, 'F');
+        pdf.setFont("helvetica", "normal"); pdf.setTextColor(55, 65, 81);
+        
+        let metaTxt = lyr.name;
+        if (lyr.isFlux) metaTxt += ` (Ligne de flux - Max Weight: ${lyr.maxWeight})`;
+        pdf.text(metaTxt, 22, currentY);
+        currentY += 5.5;
       });
     }
 
-    const loaders = [];
-    if (!window.html2canvas) loaders.push(loadDependency('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'));
-    if (!window.jspdf) loaders.push(loadDependency('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'));
+    pdf.save(`export_carto_${Date.now()}.pdf`);
+    btn.disabled = false; btn.textContent = originalText;
+  }
 
-    Promise.all(loaders).then(() => {
-      const mapElement = document.getElementById('leaflet-display-map');
-
-      html2canvas(mapElement, {
-        useCORS: true,
-        allowTaint: false,
-        scale: 2, 
-        logging: false,
-        // PRÉPARATION DU CLONE INVISIBLE AVANT LE CAPTURE PHOTO
-        onclone: function (clonedDoc) {
-          const clonedMap = clonedDoc.getElementById('leaflet-display-map');
-          if (!clonedMap) return;
-
-          // Forcer l'affichage opaque complet de toutes les étiquettes de texte (numéros de flux)
-          const tooltips = clonedMap.querySelectorAll('.leaflet-tooltip');
-          tooltips.forEach(t => {
-            t.style.opacity = '1';
-            t.style.visibility = 'visible';
-            t.style.display = 'block';
-          });
-
-          // ALGORTIHME DE CONVERSION GLOBAL DES TRANSFORMATIONS 3D EN ABSOLUTE PIXELS
-          const allEl = clonedMap.querySelectorAll('*');
-          allEl.forEach(el => {
-            const style = window.getComputedStyle(el);
-            const transform = style.transform;
-            
-            if (transform && transform !== 'none') {
-              let x = 0, y = 0;
-              
-              if (transform.indexOf('matrix(') === 0) {
-                const matrixValues = transform.replace('matrix(', '').replace(')', '').split(',');
-                x = parseFloat(matrixValues[4]);
-                y = parseFloat(matrixValues[5]);
-              } else if (transform.indexOf('matrix3d(') === 0) {
-                const matrixValues = transform.replace('matrix3d(', '').replace(')', '').split(',');
-                x = parseFloat(matrixValues[12]);
-                y = parseFloat(matrixValues[13]);
-              }
-              
-              // Si une translation de coordonnées est lue, on l'applique en dur et on efface la 3D
-              if (!isNaN(x) && !isNaN(y) && (x !== 0 || y !== 0)) {
-                el.style.transform = 'none';
-                
-                if (style.position !== 'absolute' && style.position !== 'relative' && style.position !== 'fixed') {
-                  el.style.position = 'absolute';
-                }
-                
-                const currentLeft = parseFloat(el.style.left) || parseFloat(style.left) || 0;
-                const currentTop = parseFloat(el.style.top) || parseFloat(style.top) || 0;
-                
-                el.style.left = (currentLeft + x) + 'px';
-                el.style.top = (currentTop + y) + 'px';
-              }
-            }
-          });
-        }
-      }).then(canvas => {
-        const imgData = canvas.toDataURL('image/jpeg', 0.95);
-        const { jsPDF } = window.jspdf;
-        
-        const pdf = new jsPDF('l', 'mm', 'a4');
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = pdf.internal.pageSize.getHeight();
-
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(14);
-        pdf.setTextColor(31, 41, 55);
-        pdf.text("Export Cartographique", 15, 15);
-        
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(8);
-        pdf.setTextColor(107, 114, 128);
-        pdf.text(`Généré le : ${new Date().toLocaleString()}`, 15, 20);
-
-        // Calcul homothétique parfait du carré JPEG
-        const canvasRatio = canvas.width / canvas.height;
-        let mapWidthMM = pdfWidth - 30; 
-        let mapHeightMM = mapWidthMM / canvasRatio;
-
-        if (mapHeightMM > 118) {
-          mapHeightMM = 118;
-          mapWidthMM = mapHeightMM * canvasRatio;
-        }
-
-        const posX = (pdfWidth - mapWidthMM) / 2;
-        const posY = 24;
-
-        pdf.addImage(imgData, 'JPEG', posX, posY, mapWidthMM, mapHeightMM);
-
-        let currentY = posY + mapHeightMM + 12;
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(11);
-        pdf.setTextColor(31, 41, 55);
-        pdf.text("Légende des couches visibles", 15, currentY);
-        currentY += 6;
-
-        const visibleLayers = layerControlList.filter(l => l.visible);
-
-        if (visibleLayers.length === 0) {
-          pdf.setFont("helvetica", "italic");
-          pdf.setFontSize(9);
-          pdf.setTextColor(156, 163, 175);
-          pdf.text("Aucune couche active visible sur cette carte.", 15, currentY);
-        } else {
-          pdf.setFontSize(9.5);
-          visibleLayers.forEach(lyr => {
-            if (currentY > pdfHeight - 15) {
-              pdf.addPage('l', 'mm', 'a4');
-              currentY = 20;
-            }
-
-            const hex = lyr.color.replace('#', '');
-            const r = parseInt(hex.substring(0, 2), 16);
-            const g = parseInt(hex.substring(2, 4), 16);
-            const b = parseInt(hex.substring(4, 6), 16);
-
-            pdf.setFillColor(r, g, b);
-            pdf.rect(15, currentY - 3.5, 4, 4, 'F');
-
-            pdf.setFont("helvetica", "normal");
-            pdf.setTextColor(55, 65, 81);
-            let metaTxt = lyr.name;
-            if (lyr.isFlux) metaTxt += ` (Ligne de flux - Max Weight: ${lyr.maxWeight})`;
-            
-            pdf.text(metaTxt, 22, currentY);
-            currentY += 5.5;
-          });
-        }
-
-        pdf.save(`export_carto_${Date.now()}.pdf`);
-        btn.disabled = false;
-        btn.textContent = originalText;
-      }).catch(err => {
-        console.error(err);
-        alert("Erreur technique lors de la capture de la carte.");
-        btn.disabled = false;
-        btn.textContent = originalText;
-      });
-    }).catch(() => {
-      alert("Échec du téléchargement des librairies d'exportation.");
-      btn.disabled = false;
-      btn.textContent = originalText;
-    });
-  };
-
-  // ── INTERCEPTIONS CLOUD RESTAURÉES ET INDEXÉES (ZÉRO ÉCHEC DE DOSSIER OU CHARGEMENT) ──
+  // ── SYNCHRONISATEUR DE DOSSIERS INTERACTIFS CLOUD (LOGIQUE DE CATALOGUE COPIE CONFORME) ──
   window.fetchDisplayCloud = function () {
     const btn = document.getElementById('disp-cloud-btn');
     btn.disabled = true; btn.textContent = 'Téléchargement de l\'arbre...';
@@ -533,13 +498,10 @@
         }
 
         cloudFilesStorage = files;
-
-        // Tri et groupement de dossiers : Copie conforme de la logique outils/orga.js
         const groups = {};
         files.forEach((f, globalIdx) => {
           const folderName = f.folder && f.folder.trim() !== "" ? f.folder.trim() : "Fichiers non classés";
           if (!groups[folderName]) groups[folderName] = [];
-          // Sauvegarde directe de l'index d'origine dans le catalogue pour éviter toute désynchronisation
           groups[folderName].push({ data: f, index: globalIdx });
         });
 
@@ -587,8 +549,7 @@
           </div>
         `;
         
-        btn.classList.add('hidden');
-        parent.appendChild(selectorWrap);
+        btn.classList.add('hidden'); parent.appendChild(selectorWrap);
       })
       .catch(err => { alert(err.message); window.resetDisplayCloudBtn(); });
   };
@@ -596,13 +557,8 @@
   window.toggleCloudDispFolderDOM = function (id) {
     const el = document.getElementById(id);
     const icon = document.getElementById('c_icon_fold_' + id);
-    if (el.classList.contains('hidden')) { 
-      el.classList.remove('hidden'); 
-      if (icon) icon.textContent = '📂'; 
-    } else { 
-      el.classList.add('hidden'); 
-      if (icon) icon.textContent = '📁'; 
-    }
+    if (el.classList.contains('hidden')) { el.classList.remove('hidden'); if (icon) icon.textContent = '📂'; }
+    else { el.classList.add('hidden'); if (icon) icon.textContent = '📁'; }
   };
 
   window.loadCloudFileToMap = function (globalIndex) {
@@ -611,7 +567,6 @@
       const archive = cloudFilesStorage[globalIndex];
       const geojson = typeof archive.geojsonRaw === 'string' ? JSON.parse(archive.geojsonRaw) : archive.geojsonRaw;
       injectGeoJsonLayer(geojson, archive.fileName);
-      fitMapBounds();
     } catch (e) { alert("Erreur lors de l'intégration de la couche."); }
   };
 
@@ -621,20 +576,15 @@
 
     cloudFilesStorage.forEach(archive => {
       const currentFolder = archive.folder && archive.folder.trim() !== "" ? archive.folder.trim() : "Fichiers non classés";
-      
       if (currentFolder === targetFolder) {
         try {
           const geojson = typeof archive.geojsonRaw === 'string' ? JSON.parse(archive.geojsonRaw) : archive.geojsonRaw;
           injectGeoJsonLayer(geojson, archive.fileName);
           loadedCount++;
-        } catch(e) { console.warn(`Échec de chargement sur : ${archive.fileName}`); }
+        } catch(e) {}
       }
     });
-
-    if (loadedCount > 0) {
-      fitMapBounds();
-      alert(`Dossier "${targetFolder}" : ${loadedCount} calques intégrés.`);
-    }
+    if (loadedCount > 0) alert(`Dossier "${targetFolder}" : ${loadedCount} calques intégrés.`);
   };
 
   window.resetDisplayCloudBtn = function () {
@@ -643,6 +593,14 @@
     if (wrap) wrap.remove();
     if (btn) { btn.classList.remove('hidden'); btn.disabled = false; btn.textContent = '☁️ Importer depuis Google Sheets'; }
   };
+
+  function hexToRgb(hex) {
+    const normal = hex.replace('#', '');
+    const r = parseInt(normal.substring(0, 2), 16);
+    const g = parseInt(normal.substring(2, 4), 16);
+    const b = parseInt(normal.substring(4, 6), 16);
+    return [r, g, b];
+  }
 
   setTimeout(() => { window.initDisplay(); }, 500);
 })();
