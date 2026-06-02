@@ -2,11 +2,12 @@
  * outils/display.js
  * Visualiseur cartographique multi-couches responsive avec édition de symbologie,
  * gestion dynamique des lignes de flux complexes, synchronisation stricte des dossiers
- * et moteur d'exportation PDF à mémoire d'aspect ratio (anti-déformation).
+ * et moteur d'exportation JPEG centré sans déformation.
  */
 
 (function () {
-  const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz1kvkUwAEwD-3Bc9SZqACaaZTVGhhGy_Om-F8vK0adfC5pBCg5amBNUEqSeteKJIrV/exec';
+  // Mise à jour avec l'URL exacte de votre module d'organisation
+  const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyl132O-cCNrE5H4AVHE2F7pCWO3bzq_r3Tz-MK562sOkd52XyS8auIga0p8h5Rrjkh/exec';
 
   // ── INJECTION SÉCURISÉE DES REQUIS DE BASE (LEAFLET + STYLES DES ÉTIQUETTES) ──
   if (!document.getElementById('leaflet-css')) {
@@ -48,7 +49,7 @@
   let mainMap = null;
   let layerControlList = []; 
   let cloudFilesStorage = [];
-  let cloudFolderKeys = []; // Permet le ciblage sécurisé par index des dossiers cloud
+  let cloudFolderKeys = []; // Permet le ciblage par index des dossiers cloud
   const layerColors = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#6366F1', '#1a1a1a'];
   let colorIndex = 0;
 
@@ -355,7 +356,7 @@
     if (bounds.isValid()) mainMap.fitBounds(bounds, { padding: [25, 25] });
   }
 
-  // ── MOTEUR D'EXPORTATION PDF OPTIMISÉ (CONSERVATION STRICTE DU RATIO D'ASPECT) ──
+  // ── LOGIQUE EXPORT PDF CORRIGÉE : CAPTURE JPEG CENTRÉE ET RESPECT HOMOTHÉTIQUE ──
   window.exportMapToPDF = function () {
     const btn = document.getElementById('disp-export-pdf-btn');
     const originalText = btn.textContent;
@@ -376,6 +377,7 @@
     if (!window.jspdf) loaders.push(loadDependency('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'));
 
     Promise.all(loaders).then(() => {
+      // Ciblage strict du carré de la carte Leaflet
       const mapElement = document.getElementById('leaflet-display-map');
 
       html2canvas(mapElement, {
@@ -384,15 +386,17 @@
         scale: 2, 
         logging: false
       }).then(canvas => {
-        const imgData = canvas.toDataURL('image/png');
+        // Encodage propre en JPEG
+        const imgData = canvas.toDataURL('image/jpeg', 0.95);
         const { jsPDF } = window.jspdf;
         
         const pdf = new jsPDF('l', 'mm', 'a4');
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = pdf.internal.pageSize.getHeight();
+        const pdfWidth = pdf.internal.pageSize.getWidth(); // 297mm
+        const pdfHeight = pdf.internal.pageSize.getHeight(); // 210mm
 
+        // Titre du PDF
         pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(15);
+        pdf.setFontSize(14);
         pdf.setTextColor(31, 41, 55);
         pdf.text("Export Cartographique", 15, 15);
         
@@ -401,24 +405,26 @@
         pdf.setTextColor(107, 114, 128);
         pdf.text(`Généré le : ${new Date().toLocaleString()}`, 15, 20);
 
-        // Algorithme anti-déformation homothétique strict (Garantit la superposition exacte)
-        const maxAvailableHeight = 115; 
-        let mapWidthMM = pdfWidth - 30; // Largeur par défaut basée sur les marges
-        let mapHeightMM = (canvas.height * mapWidthMM) / canvas.width; // Calcul proportionnel initial
+        // Calcul d'aspect ratio strict pour éviter toute déformation du JPEG
+        const canvasRatio = canvas.width / canvas.height;
+        let mapWidthMM = pdfWidth - 30; // Largeur max disponible (267mm)
+        let mapHeightMM = mapWidthMM / canvasRatio;
 
-        // Si la hauteur calculée sature la limite, on adapte la largeur pour garder le ratio intact
-        if (mapHeightMM > maxAvailableHeight) {
-          mapHeightMM = maxAvailableHeight;
-          mapWidthMM = (canvas.width * mapHeightMM) / canvas.height;
+        // Si la hauteur dépasse la zone limite (pour garder de la place pour la légende)
+        if (mapHeightMM > 120) {
+          mapHeightMM = 120;
+          mapWidthMM = mapHeightMM * canvasRatio;
         }
 
-        // Centrage de la carte sur l'axe X pour un rendu d'impression esthétique
-        const targetX = 15 + (pdfWidth - 30 - mapWidthMM) / 2;
+        // Centrage parfait horizontal et calage vertical à 24mm
+        const posX = (pdfWidth - mapWidthMM) / 2;
+        const posY = 24;
 
-        pdf.addImage(imgData, 'PNG', targetX, 24, mapWidthMM, mapHeightMM);
+        // Insertion du JPEG au milieu
+        pdf.addImage(imgData, 'JPEG', posX, posY, mapWidthMM, mapHeightMM);
 
-        // Génération de la légende dynamique
-        let currentY = 24 + mapHeightMM + 12;
+        // Intégration de la légende en bas de la carte
+        let currentY = posY + mapHeightMM + 12;
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(11);
         pdf.setTextColor(31, 41, 55);
@@ -459,23 +465,22 @@
         }
 
         pdf.save(`export_carto_${Date.now()}.pdf`);
-        
         btn.disabled = false;
         btn.textContent = originalText;
       }).catch(err => {
         console.error(err);
-        alert("Erreur technique survenue lors du rendu graphique de la carte.");
+        alert("Erreur technique lors de la capture de la carte.");
         btn.disabled = false;
         btn.textContent = originalText;
       });
     }).catch(() => {
-      alert("Échec du chargement des utilitaires d'exportation PDF externes.");
+      alert("Échec du téléchargement des librairies d'exportation.");
       btn.disabled = false;
       btn.textContent = originalText;
     });
   };
 
-  // ── REPRISE DE LA LOGIQUE STRICTE DU FICHIER ORGA.JS POUR LE CATALOGUE CLOUD ──
+  // ── HARMONISATION ET REPRISE DE LA LOGIQUE STRICTE DU DOSSIER ORGA.JS ──
   window.fetchDisplayCloud = function () {
     const btn = document.getElementById('disp-cloud-btn');
     btn.disabled = true; btn.textContent = 'Téléchargement de l\'arbre...';
@@ -490,7 +495,7 @@
 
         cloudFilesStorage = files;
 
-        // Application de la formule exacte du fichier outils/orga.js (Colonne E)
+        // Tri et groupement de dossiers : Copie conforme de la logique outils/orga.js
         const groups = {};
         files.forEach(f => {
           const folderName = f.folder && f.folder.trim() !== "" ? f.folder.trim() : "Fichiers non classés";
@@ -498,7 +503,6 @@
           groups[folderName].push(f);
         });
 
-        // Stockage des clés globales ordonnées pour le ciblage par index sécurisé
         cloudFolderKeys = Object.keys(groups);
 
         const parent = btn.parentNode;
@@ -520,7 +524,7 @@
                     <div class="flex items-center gap-1.5 cursor-pointer flex-1 min-w-0" onclick="window.toggleCloudDispFolderDOM('c_fold_${fIdx}')">
                       <span id="c_icon_fold_c_fold_${fIdx}">📁</span>
                       <span class="font-semibold text-gray-700 truncate text-[11px]">${folderName}</span>
-                      <span class="bg-gray-200 text-gray-600 px-1 py-0.2 rounded-full text-[9px] font-medium">${folderItems.length}</span>
+                      <span class="bg-gray-200 text-gray-600 px-1.5 py-0.2 rounded-full text-[9px] font-medium">${folderItems.length}</span>
                     </div>
                     <button onclick="window.loadCloudFolderToMap(${fIdx})" class="text-[9px] bg-gray-900 text-white font-medium px-1.5 py-0.5 rounded hover:bg-gray-800 shrink-0 ml-1">
                       ⚡ charger tout
@@ -528,7 +532,6 @@
                   </div>
                   <div id="c_fold_${fIdx}" class="divide-y divide-gray-50 hidden bg-white">
                     ${folderItems.map(item => {
-                      // Recherche de l'index d'origine dans le tableau plat cloudFilesStorage
                       const globalIndex = cloudFilesStorage.findIndex(c => c.fileName === item.fileName && c.sentAt === item.sentAt);
                       return `
                         <div class="p-2 flex items-center justify-between gap-2 hover:bg-gray-50/60">
@@ -583,7 +586,6 @@
 
     let loadedCount = 0;
     cloudFilesStorage.forEach(archive => {
-      // Même formule logique rigoureuse de vérification de dossier
       const currentFolder = archive.folder && archive.folder.trim() !== "" ? archive.folder.trim() : "Fichiers non classés";
       
       if (currentFolder === targetFolder) {
