@@ -355,7 +355,101 @@
     if (bounds.isValid()) mainMap.fitBounds(bounds, { padding: [25, 25] });
   }
 
-  // ── LOGIQUE EXPORT PDF RECOMPOSÉE : CLONE INVISIBLE ANTI-TRANSFORM 3D ET IMAGE CENTRÉE ──
+  // ── HELPERS : DÉCODAGE DES TRANSFORMS CSS (matrix ET matrix3d) ──
+  function getTranslateFromTransform(transformStr) {
+    if (!transformStr || transformStr === 'none') return { x: 0, y: 0 };
+
+    // matrix3d(a,b,c,d, e,f,g,h, i,j,k,l, tx,ty,tz,tw)
+    const m3 = transformStr.match(/^matrix3d\((.+)\)$/);
+    if (m3) {
+      const v = m3[1].split(',').map(s => parseFloat(s.trim()));
+      return { x: v[12] || 0, y: v[13] || 0 };
+    }
+
+    // matrix(a,b,c,d,tx,ty)
+    const m2 = transformStr.match(/^matrix\((.+)\)$/);
+    if (m2) {
+      const v = m2[1].split(',').map(s => parseFloat(s.trim()));
+      return { x: v[4] || 0, y: v[5] || 0 };
+    }
+
+    // translate(x, y) ou translate3d(x, y, z)
+    const t3 = transformStr.match(/translate3d\(\s*([-\d.]+)px\s*,\s*([-\d.]+)px/);
+    if (t3) return { x: parseFloat(t3[1]), y: parseFloat(t3[2]) };
+
+    const t2 = transformStr.match(/translate\(\s*([-\d.]+)px\s*,\s*([-\d.]+)px/);
+    if (t2) return { x: parseFloat(t2[1]), y: parseFloat(t2[2]) };
+
+    return { x: 0, y: 0 };
+  }
+
+  // ── NORMALISATION COMPLÈTE DE TOUS LES PANES LEAFLET DANS LE CLONE ──
+  // Stratégie : récupérer les transforms calculés DANS LE DOCUMENT LIVE,
+  // puis les convertir en top/left absolus dans le clone (qui n'a pas le JS Leaflet actif).
+  function normalizeLeafletClone(clonedDoc, liveDoc) {
+    const clonedMapEl = clonedDoc.getElementById('leaflet-display-map');
+    if (!clonedMapEl) return;
+
+    // 1. Neutraliser overflow:hidden sur le conteneur de la carte pour que html2canvas
+    //    capture tout ce qui déborde (tooltips, etc.)
+    clonedMapEl.style.overflow = 'visible';
+
+    // 2. Résoudre le pane principal (leaflet-map-pane) — il porte le translate3d global
+    const liveMapPane = liveDoc.querySelector('#leaflet-display-map .leaflet-map-pane');
+    const clonedMapPane = clonedMapEl.querySelector('.leaflet-map-pane');
+
+    if (liveMapPane && clonedMapPane) {
+      const liveTransform = window.getComputedStyle(liveMapPane).transform;
+      const { x: px, y: py } = getTranslateFromTransform(liveTransform);
+
+      const baseLeft = parseFloat(clonedMapPane.style.left) || 0;
+      const baseTop  = parseFloat(clonedMapPane.style.top)  || 0;
+
+      clonedMapPane.style.transform = 'none';
+      clonedMapPane.style.left = (baseLeft + px) + 'px';
+      clonedMapPane.style.top  = (baseTop  + py) + 'px';
+    }
+
+    // 3. Traiter TOUS les panes enfants (tile-pane, overlay-pane, marker-pane,
+    //    tooltip-pane, shadow-pane, etc.) qui peuvent avoir leur propre transform
+    const liveChildPanes  = liveDoc.querySelectorAll('#leaflet-display-map .leaflet-map-pane > *');
+    const clonedChildPanes = clonedMapEl.querySelectorAll('.leaflet-map-pane > *');
+
+    liveChildPanes.forEach((livePaneChild, idx) => {
+      const clonedPaneChild = clonedChildPanes[idx];
+      if (!clonedPaneChild) return;
+
+      const t = window.getComputedStyle(livePaneChild).transform;
+      if (t && t !== 'none') {
+        const { x, y } = getTranslateFromTransform(t);
+        if (x !== 0 || y !== 0) {
+          const bl = parseFloat(clonedPaneChild.style.left) || 0;
+          const bt = parseFloat(clonedPaneChild.style.top)  || 0;
+          clonedPaneChild.style.transform = 'none';
+          clonedPaneChild.style.left = (bl + x) + 'px';
+          clonedPaneChild.style.top  = (bt + y) + 'px';
+        }
+      }
+    });
+
+    // 4. Forcer visibilité des tooltips permanents
+    clonedMapEl.querySelectorAll('.leaflet-tooltip').forEach(t => {
+      t.style.opacity      = '1';
+      t.style.visibility   = 'visible';
+      t.style.display      = 'block';
+      t.style.pointerEvents = 'none';
+    });
+
+    // 5. S'assurer que le SVG overlay n'est pas décalé
+    clonedMapEl.querySelectorAll('.leaflet-overlay-pane svg').forEach(svg => {
+      svg.style.transform = 'none';
+      svg.style.position  = 'absolute';
+      svg.style.left = '0';
+      svg.style.top  = '0';
+    });
+  }
+
+  // ── LOGIQUE EXPORT PDF — CORRECTION COMPLÈTE DES DÉCALAGES LEAFLET ──
   window.exportMapToPDF = function () {
     const btn = document.getElementById('disp-export-pdf-btn');
     const originalText = btn.textContent;
@@ -373,54 +467,34 @@
 
     const loaders = [];
     if (!window.html2canvas) loaders.push(loadDependency('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'));
-    if (!window.jspdf) loaders.push(loadDependency('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'));
+    if (!window.jspdf)       loaders.push(loadDependency('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'));
 
     Promise.all(loaders).then(() => {
       const mapElement = document.getElementById('leaflet-display-map');
 
+      // Garder une référence au document live AVANT que html2canvas ne clone
+      const liveDoc = document;
+
       html2canvas(mapElement, {
-        useCORS: true,
-        allowTaint: false,
-        scale: 2, 
-        logging: false,
-        // INTERCEPTION DANS UN CLONE INVISIBLE AVANT CONVERSION GRAPHIQUE
+        useCORS:     true,
+        allowTaint:  false,
+        scale:       2,
+        logging:     false,
+        // Désactiver la détection automatique de foreignObject pour éviter les doubles passes
+        foreignObjectRendering: false,
+
         onclone: function (clonedDoc) {
-          const clonedMap = clonedDoc.getElementById('leaflet-display-map');
-          if (!clonedMap) return;
-
-          // Conversion de l'enveloppe globale CSS translate3d en coordonnées standards top/left
-          const mapPane = clonedMap.querySelector('.leaflet-map-pane');
-          if (mapPane) {
-            const transform = window.getComputedStyle(mapPane).transform;
-            if (transform && transform !== 'none') {
-              const matrix = transform.match(/^matrix\((.+)\)$/);
-              if (matrix) {
-                const values = matrix[1].split(', ');
-                const x = parseFloat(values[4]);
-                const y = parseFloat(values[5]);
-                
-                mapPane.style.transform = 'none';
-                mapPane.style.left = (parseFloat(mapPane.style.left || 0) + x) + 'px';
-                mapPane.style.top = (parseFloat(mapPane.style.top || 0) + y) + 'px';
-              }
-            }
-          }
-
-          // Forcer la visibilité et l'opacité à 100% sur le conteneur des étiquettes textuelles
-          const tooltips = clonedMap.querySelectorAll('.leaflet-tooltip-pane .leaflet-tooltip');
-          tooltips.forEach(tooltip => {
-            tooltip.style.opacity = '1';
-            tooltip.style.visibility = 'visible';
-          });
+          // Déléguer toute la correction au helper dédié
+          normalizeLeafletClone(clonedDoc, liveDoc);
         }
       }).then(canvas => {
-        // Encodage strict en JPEG
+        // Encodage JPEG
         const imgData = canvas.toDataURL('image/jpeg', 0.95);
         const { jsPDF } = window.jspdf;
         
         const pdf = new jsPDF('l', 'mm', 'a4');
-        const pdfWidth = pdf.internal.pageSize.getWidth(); // 297mm
-        const pdfHeight = pdf.internal.pageSize.getHeight(); // 210mm
+        const pdfWidth  = pdf.internal.pageSize.getWidth();   // 297mm
+        const pdfHeight = pdf.internal.pageSize.getHeight();  // 210mm
 
         // En-tête textuel
         pdf.setFont("helvetica", "bold");
@@ -433,24 +507,22 @@
         pdf.setTextColor(107, 114, 128);
         pdf.text(`Généré le : ${new Date().toLocaleString()}`, 15, 20);
 
-        // Calcul d'aspect ratio strict basé sur le canvas pour éviter les étirements
+        // Calcul aspect ratio strict pour éviter les étirements
         const canvasRatio = canvas.width / canvas.height;
-        let mapWidthMM = pdfWidth - 30; // Marges de 15mm de chaque côté
+        let mapWidthMM  = pdfWidth - 30;
         let mapHeightMM = mapWidthMM / canvasRatio;
 
-        // Limite verticale stricte pour réserver l'espace du bas à la légende
         if (mapHeightMM > 118) {
           mapHeightMM = 118;
-          mapWidthMM = mapHeightMM * canvasRatio;
+          mapWidthMM  = mapHeightMM * canvasRatio;
         }
 
-        // Alignement horizontal et vertical au milieu de la feuille
         const posX = (pdfWidth - mapWidthMM) / 2;
         const posY = 24;
 
         pdf.addImage(imgData, 'JPEG', posX, posY, mapWidthMM, mapHeightMM);
 
-        // Légende dynamique des couches cochées
+        // Légende dynamique
         let currentY = posY + mapHeightMM + 12;
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(11);
