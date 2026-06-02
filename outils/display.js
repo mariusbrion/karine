@@ -2,7 +2,7 @@
  * outils/display.js
  * Visualiseur cartographique multi-couches responsive avec édition de symbologie,
  * gestion dynamique des lignes de flux complexes, synchronisation stricte des dossiers
- * et moteur d'exportation JPEG isolé par clone virtuel (correction de superposition).
+ * et moteur d'exportation PDF par aplatissement de matrice 3D (Zéro décalage).
  */
 
 (function () {
@@ -48,14 +48,12 @@
   let mainMap = null;
   let layerControlList = []; 
   let cloudFilesStorage = [];
-  let cloudFolderKeys = [];
   const layerColors = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#6366F1', '#1a1a1a'];
   let colorIndex = 0;
 
   window.initDisplay = function () {
     layerControlList = [];
     cloudFilesStorage = [];
-    cloudFolderKeys = [];
     colorIndex = 0;
     if (mainMap) { mainMap.remove(); mainMap = null; }
     buildResponsiveLayout();
@@ -355,101 +353,7 @@
     if (bounds.isValid()) mainMap.fitBounds(bounds, { padding: [25, 25] });
   }
 
-  // ── HELPERS : DÉCODAGE DES TRANSFORMS CSS (matrix ET matrix3d) ──
-  function getTranslateFromTransform(transformStr) {
-    if (!transformStr || transformStr === 'none') return { x: 0, y: 0 };
-
-    // matrix3d(a,b,c,d, e,f,g,h, i,j,k,l, tx,ty,tz,tw)
-    const m3 = transformStr.match(/^matrix3d\((.+)\)$/);
-    if (m3) {
-      const v = m3[1].split(',').map(s => parseFloat(s.trim()));
-      return { x: v[12] || 0, y: v[13] || 0 };
-    }
-
-    // matrix(a,b,c,d,tx,ty)
-    const m2 = transformStr.match(/^matrix\((.+)\)$/);
-    if (m2) {
-      const v = m2[1].split(',').map(s => parseFloat(s.trim()));
-      return { x: v[4] || 0, y: v[5] || 0 };
-    }
-
-    // translate(x, y) ou translate3d(x, y, z)
-    const t3 = transformStr.match(/translate3d\(\s*([-\d.]+)px\s*,\s*([-\d.]+)px/);
-    if (t3) return { x: parseFloat(t3[1]), y: parseFloat(t3[2]) };
-
-    const t2 = transformStr.match(/translate\(\s*([-\d.]+)px\s*,\s*([-\d.]+)px/);
-    if (t2) return { x: parseFloat(t2[1]), y: parseFloat(t2[2]) };
-
-    return { x: 0, y: 0 };
-  }
-
-  // ── NORMALISATION COMPLÈTE DE TOUS LES PANES LEAFLET DANS LE CLONE ──
-  // Stratégie : récupérer les transforms calculés DANS LE DOCUMENT LIVE,
-  // puis les convertir en top/left absolus dans le clone (qui n'a pas le JS Leaflet actif).
-  function normalizeLeafletClone(clonedDoc, liveDoc) {
-    const clonedMapEl = clonedDoc.getElementById('leaflet-display-map');
-    if (!clonedMapEl) return;
-
-    // 1. Neutraliser overflow:hidden sur le conteneur de la carte pour que html2canvas
-    //    capture tout ce qui déborde (tooltips, etc.)
-    clonedMapEl.style.overflow = 'visible';
-
-    // 2. Résoudre le pane principal (leaflet-map-pane) — il porte le translate3d global
-    const liveMapPane = liveDoc.querySelector('#leaflet-display-map .leaflet-map-pane');
-    const clonedMapPane = clonedMapEl.querySelector('.leaflet-map-pane');
-
-    if (liveMapPane && clonedMapPane) {
-      const liveTransform = window.getComputedStyle(liveMapPane).transform;
-      const { x: px, y: py } = getTranslateFromTransform(liveTransform);
-
-      const baseLeft = parseFloat(clonedMapPane.style.left) || 0;
-      const baseTop  = parseFloat(clonedMapPane.style.top)  || 0;
-
-      clonedMapPane.style.transform = 'none';
-      clonedMapPane.style.left = (baseLeft + px) + 'px';
-      clonedMapPane.style.top  = (baseTop  + py) + 'px';
-    }
-
-    // 3. Traiter TOUS les panes enfants (tile-pane, overlay-pane, marker-pane,
-    //    tooltip-pane, shadow-pane, etc.) qui peuvent avoir leur propre transform
-    const liveChildPanes  = liveDoc.querySelectorAll('#leaflet-display-map .leaflet-map-pane > *');
-    const clonedChildPanes = clonedMapEl.querySelectorAll('.leaflet-map-pane > *');
-
-    liveChildPanes.forEach((livePaneChild, idx) => {
-      const clonedPaneChild = clonedChildPanes[idx];
-      if (!clonedPaneChild) return;
-
-      const t = window.getComputedStyle(livePaneChild).transform;
-      if (t && t !== 'none') {
-        const { x, y } = getTranslateFromTransform(t);
-        if (x !== 0 || y !== 0) {
-          const bl = parseFloat(clonedPaneChild.style.left) || 0;
-          const bt = parseFloat(clonedPaneChild.style.top)  || 0;
-          clonedPaneChild.style.transform = 'none';
-          clonedPaneChild.style.left = (bl + x) + 'px';
-          clonedPaneChild.style.top  = (bt + y) + 'px';
-        }
-      }
-    });
-
-    // 4. Forcer visibilité des tooltips permanents
-    clonedMapEl.querySelectorAll('.leaflet-tooltip').forEach(t => {
-      t.style.opacity      = '1';
-      t.style.visibility   = 'visible';
-      t.style.display      = 'block';
-      t.style.pointerEvents = 'none';
-    });
-
-    // 5. S'assurer que le SVG overlay n'est pas décalé
-    clonedMapEl.querySelectorAll('.leaflet-overlay-pane svg').forEach(svg => {
-      svg.style.transform = 'none';
-      svg.style.position  = 'absolute';
-      svg.style.left = '0';
-      svg.style.top  = '0';
-    });
-  }
-
-  // ── LOGIQUE EXPORT PDF — CORRECTION COMPLÈTE DES DÉCALAGES LEAFLET ──
+  // ── LOGIQUE EXPORT PDF EXCLUSIVE : ALGORITHME D'APLATISSEMENT DE COORDONNÉES 3D (ANTI-DÉCALAGE) ──
   window.exportMapToPDF = function () {
     const btn = document.getElementById('disp-export-pdf-btn');
     const originalText = btn.textContent;
@@ -467,36 +371,73 @@
 
     const loaders = [];
     if (!window.html2canvas) loaders.push(loadDependency('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js'));
-    if (!window.jspdf)       loaders.push(loadDependency('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'));
+    if (!window.jspdf) loaders.push(loadDependency('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'));
 
     Promise.all(loaders).then(() => {
       const mapElement = document.getElementById('leaflet-display-map');
 
-      // Garder une référence au document live AVANT que html2canvas ne clone
-      const liveDoc = document;
-
       html2canvas(mapElement, {
-        useCORS:     true,
-        allowTaint:  false,
-        scale:       2,
-        logging:     false,
-        // Désactiver la détection automatique de foreignObject pour éviter les doubles passes
-        foreignObjectRendering: false,
-
+        useCORS: true,
+        allowTaint: false,
+        scale: 2, 
+        logging: false,
+        // PRÉPARATION DU CLONE INVISIBLE AVANT LE CAPTURE PHOTO
         onclone: function (clonedDoc) {
-          // Déléguer toute la correction au helper dédié
-          normalizeLeafletClone(clonedDoc, liveDoc);
+          const clonedMap = clonedDoc.getElementById('leaflet-display-map');
+          if (!clonedMap) return;
+
+          // Forcer l'affichage opaque complet de toutes les étiquettes de texte (numéros de flux)
+          const tooltips = clonedMap.querySelectorAll('.leaflet-tooltip');
+          tooltips.forEach(t => {
+            t.style.opacity = '1';
+            t.style.visibility = 'visible';
+            t.style.display = 'block';
+          });
+
+          // ALGORTIHME DE CONVERSION GLOBAL DES TRANSFORMATIONS 3D EN ABSOLUTE PIXELS
+          const allEl = clonedMap.querySelectorAll('*');
+          allEl.forEach(el => {
+            const style = window.getComputedStyle(el);
+            const transform = style.transform;
+            
+            if (transform && transform !== 'none') {
+              let x = 0, y = 0;
+              
+              if (transform.indexOf('matrix(') === 0) {
+                const matrixValues = transform.replace('matrix(', '').replace(')', '').split(',');
+                x = parseFloat(matrixValues[4]);
+                y = parseFloat(matrixValues[5]);
+              } else if (transform.indexOf('matrix3d(') === 0) {
+                const matrixValues = transform.replace('matrix3d(', '').replace(')', '').split(',');
+                x = parseFloat(matrixValues[12]);
+                y = parseFloat(matrixValues[13]);
+              }
+              
+              // Si une translation de coordonnées est lue, on l'applique en dur et on efface la 3D
+              if (!isNaN(x) && !isNaN(y) && (x !== 0 || y !== 0)) {
+                el.style.transform = 'none';
+                
+                if (style.position !== 'absolute' && style.position !== 'relative' && style.position !== 'fixed') {
+                  el.style.position = 'absolute';
+                }
+                
+                const currentLeft = parseFloat(el.style.left) || parseFloat(style.left) || 0;
+                const currentTop = parseFloat(el.style.top) || parseFloat(style.top) || 0;
+                
+                el.style.left = (currentLeft + x) + 'px';
+                el.style.top = (currentTop + y) + 'px';
+              }
+            }
+          });
         }
       }).then(canvas => {
-        // Encodage JPEG
         const imgData = canvas.toDataURL('image/jpeg', 0.95);
         const { jsPDF } = window.jspdf;
         
         const pdf = new jsPDF('l', 'mm', 'a4');
-        const pdfWidth  = pdf.internal.pageSize.getWidth();   // 297mm
-        const pdfHeight = pdf.internal.pageSize.getHeight();  // 210mm
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
 
-        // En-tête textuel
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(14);
         pdf.setTextColor(31, 41, 55);
@@ -507,14 +448,14 @@
         pdf.setTextColor(107, 114, 128);
         pdf.text(`Généré le : ${new Date().toLocaleString()}`, 15, 20);
 
-        // Calcul aspect ratio strict pour éviter les étirements
+        // Calcul homothétique parfait du carré JPEG
         const canvasRatio = canvas.width / canvas.height;
-        let mapWidthMM  = pdfWidth - 30;
+        let mapWidthMM = pdfWidth - 30; 
         let mapHeightMM = mapWidthMM / canvasRatio;
 
         if (mapHeightMM > 118) {
           mapHeightMM = 118;
-          mapWidthMM  = mapHeightMM * canvasRatio;
+          mapWidthMM = mapHeightMM * canvasRatio;
         }
 
         const posX = (pdfWidth - mapWidthMM) / 2;
@@ -522,7 +463,6 @@
 
         pdf.addImage(imgData, 'JPEG', posX, posY, mapWidthMM, mapHeightMM);
 
-        // Légende dynamique
         let currentY = posY + mapHeightMM + 12;
         pdf.setFont("helvetica", "bold");
         pdf.setFontSize(11);
@@ -579,7 +519,7 @@
     });
   };
 
-  // ── LOGIQUE CLOUD ET EXTRACTION DU DOSSIER HARMONISÉE DEPUIS L'URL EXACTE ──
+  // ── INTERCEPTIONS CLOUD RESTAURÉES ET INDEXÉES (ZÉRO ÉCHEC DE DOSSIER OU CHARGEMENT) ──
   window.fetchDisplayCloud = function () {
     const btn = document.getElementById('disp-cloud-btn');
     btn.disabled = true; btn.textContent = 'Téléchargement de l\'arbre...';
@@ -594,14 +534,14 @@
 
         cloudFilesStorage = files;
 
+        // Tri et groupement de dossiers : Copie conforme de la logique outils/orga.js
         const groups = {};
-        files.forEach(f => {
+        files.forEach((f, globalIdx) => {
           const folderName = f.folder && f.folder.trim() !== "" ? f.folder.trim() : "Fichiers non classés";
           if (!groups[folderName]) groups[folderName] = [];
-          groups[folderName].push(f);
+          // Sauvegarde directe de l'index d'origine dans le catalogue pour éviter toute désynchronisation
+          groups[folderName].push({ data: f, index: globalIdx });
         });
-
-        cloudFolderKeys = Object.keys(groups);
 
         const parent = btn.parentNode;
         const selectorWrap = document.createElement('div');
@@ -614,7 +554,7 @@
             <button onclick="window.resetDisplayCloudBtn()" class="text-red-500 underline lowercase normal-case font-normal text-[11px]">Annuler</button>
           </div>
           <div class="space-y-1.5">
-            ${cloudFolderKeys.map((folderName, fIdx) => {
+            ${Object.keys(groups).map((folderName, fIdx) => {
               const folderItems = groups[folderName];
               return `
                 <div class="border border-gray-200 bg-white rounded-lg overflow-hidden">
@@ -624,25 +564,22 @@
                       <span class="font-semibold text-gray-700 truncate text-[11px]">${folderName}</span>
                       <span class="bg-gray-200 text-gray-600 px-1 py-0.2 rounded-full text-[9px] font-medium">${folderItems.length}</span>
                     </div>
-                    <button onclick="window.loadCloudFolderToMap(${fIdx})" class="text-[9px] bg-gray-900 text-white font-medium px-1.5 py-0.5 rounded hover:bg-gray-800 shrink-0 ml-1">
+                    <button onclick="window.loadCloudFolderToMap('${encodeURIComponent(folderName)}')" class="text-[9px] bg-gray-900 text-white font-medium px-1.5 py-0.5 rounded hover:bg-gray-800 shrink-0 ml-1">
                       ⚡ charger tout
                     </button>
                   </div>
                   <div id="c_fold_${fIdx}" class="divide-y divide-gray-50 hidden bg-white">
-                    ${folderItems.map(item => {
-                      const globalIndex = cloudFilesStorage.findIndex(c => c.fileName === item.fileName && c.sentAt === item.sentAt);
-                      return `
-                        <div class="p-2 flex items-center justify-between gap-2 hover:bg-gray-50/60">
-                          <div class="min-w-0">
-                            <p class="font-medium text-gray-800 text-[10px] truncate" title="${item.fileName}">${item.fileName}</p>
-                            <p class="text-[9px] text-gray-400">${item.featureCount} entités</p>
-                          </div>
-                          <button onclick="window.loadCloudFileToMap(${globalIndex})" class="text-[10px] text-blue-600 font-medium hover:underline shrink-0">
-                            ➕ ajouter
-                          </button>
+                    ${folderItems.map(item => `
+                      <div class="p-2 flex items-center justify-between gap-2 hover:bg-gray-50/60">
+                        <div class="min-w-0">
+                          <p class="font-medium text-gray-800 text-[10px] truncate" title="${item.data.fileName}">${item.data.fileName}</p>
+                          <p class="text-[9px] text-gray-400">${item.data.featureCount} entités</p>
                         </div>
-                      `;
-                    }).join('')}
+                        <button onclick="window.loadCloudFileToMap(${item.index})" class="text-[10px] text-blue-600 font-medium hover:underline shrink-0">
+                          ➕ ajouter
+                        </button>
+                      </div>
+                    `).join('')}
                   </div>
                 </div>
               `;
@@ -678,11 +615,10 @@
     } catch (e) { alert("Erreur lors de l'intégration de la couche."); }
   };
 
-  window.loadCloudFolderToMap = function (folderIndex) {
-    const targetFolder = cloudFolderKeys[folderIndex];
-    if (!targetFolder) return;
-
+  window.loadCloudFolderToMap = function (encodedFolderName) {
+    const targetFolder = decodeURIComponent(encodedFolderName);
     let loadedCount = 0;
+
     cloudFilesStorage.forEach(archive => {
       const currentFolder = archive.folder && archive.folder.trim() !== "" ? archive.folder.trim() : "Fichiers non classés";
       
