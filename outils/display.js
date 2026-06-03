@@ -138,7 +138,7 @@
     const layers = [
       new deck.TileLayer({
         id: 'base-tiles',
-        data: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+        data: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
         renderSubLayers: props => {
           const { bbox: { west, south, east, north } } = props.tile;
           return new deck.BitmapLayer(props, {
