@@ -157,7 +157,7 @@
         body: JSON.stringify({ coordinates: [[startLatLng.lng, startLatLng.lat], [destinationLatLng.lng, destinationLatLng.lat]] })
       });
 
-      if (!response.ok) throw new Error("Erreur itinéraire.");
+      if (!response.ok) throw new Error("Erreur itinéraire API.");
       const data = await response.json();
       const route = data.features[0];
       if (!route) return;
@@ -166,7 +166,7 @@
       processSegments(route.geometry.coordinates, weight);
 
       if (!skipRender) { renderFlow(); updateTripsList(); }
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error("Erreur addTrip:", err); }
   }
 
   function processSegments(coordinates, weight) {
@@ -203,30 +203,47 @@
         });
       } else {
         const json = JSON.parse(ev.target.result);
-        points = extractPointsFromGeoJSON(json);
+        points = extractPointsFromGeoJSON(json, false); // false = garde le poids du fichier local si désiré
       }
       if (points.length > 0) await processPointsInBulk(points);
     };
     reader.readAsText(file);
   };
 
-  function extractPointsFromGeoJSON(json) {
+  // Correction de l'extraction des propriétés pour lire la longitude/latitude textuelle du Cloud
+  // et forcer le poids à 1 si demandé.
+  function extractPointsFromGeoJSON(json, forceWeightOne = false) {
     const points = [];
     const features = json.features || (json.type === 'Feature' ? [json] : []);
+    
     features.forEach(f => {
-      if (f.geometry?.type === 'Point') {
-        points.push({
-          lat: f.geometry.coordinates[1],
-          lng: f.geometry.coordinates[0],
-          weight: f.properties?.weight || f.properties?.count || f.properties?.result_score || 1
-        });
+      let lat = null;
+      let lng = null;
+
+      // 1. Essai de lecture depuis properties.latitude / properties.longitude (Cas du Cloud Sheets)
+      if (f.properties?.latitude && f.properties?.longitude) {
+        lat = parseFloat(f.properties.latitude);
+        lng = parseFloat(f.properties.longitude);
+      } 
+      // 2. Fallback standard GeoJSON Point geometry
+      else if (f.geometry?.type === 'Point' && Array.isArray(f.geometry.coordinates)) {
+        lng = f.geometry.coordinates[0];
+        lat = f.geometry.coordinates[1];
+      }
+
+      if (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng)) {
+        // Applique 1 si forceWeightOne est vrai, sinon cherche le poids standard
+        const weight = forceWeightOne ? 1 : (f.properties?.weight || f.properties?.count || f.properties?.result_score || 1);
+        points.push({ lat, lng, weight });
       }
     });
     return points;
   }
 
   async function processPointsInBulk(points) {
+    if (isProcessingBatch) return; // Sécurité double exécution
     isProcessingBatch = true;
+    
     const containerBlock = document.getElementById('batchProgressContainer');
     const bar = document.getElementById('batchProgressBar');
     const percentText = document.getElementById('progressPercent');
@@ -235,17 +252,29 @@
     containerBlock.classList.remove('hidden');
     const total = points.length;
 
+    // Boucle stricte séquentielle un trajet à la fois (await)
     for (let i = 0; i < total; i++) {
       if (!isProcessingBatch) break;
+      
+      // Exécute et attend la fin de la requête API avant de passer au point suivant
       await addTrip({ lat: points[i].lat, lng: points[i].lng }, points[i].weight, mode, true);
       
       const progress = Math.round(((i + 1) / total) * 100);
       bar.style.width = progress + '%';
       percentText.innerText = progress + '%';
 
-      if (i % 4 === 0 || i === total - 1) { renderFlow(); updateTripsList(); }
+      // Rafraîchissement régulier de l'interface graphique
+      if (i % 2 === 0 || i === total - 1) { 
+        renderFlow(); 
+        updateTripsList(); 
+      }
+      
+      // Respect strict des limites de l'API (1.5 seconde de délai entre chaque requête)
       await new Promise(r => setTimeout(r, 1500));
     }
+    
+    renderFlow();
+    updateTripsList();
     isProcessingBatch = false;
     setTimeout(() => containerBlock.classList.add('hidden'), 2500);
   }
@@ -326,17 +355,17 @@
       const archive = cloudTrajetStorage[parseInt(index)];
       const geojson = typeof archive.geojsonRaw === 'string' ? JSON.parse(archive.geojsonRaw) : archive.geojsonRaw;
       
-      // Extraction dynamique des entités "Point"
-      const extractedPoints = extractPointsFromGeoJSON(geojson);
+      // On passe "true" pour forcer chaque ligne issue du Cloud à avoir un weight de 1
+      const extractedPoints = extractPointsFromGeoJSON(geojson, true);
 
       if (extractedPoints.length === 0) {
-        alert("Aucun entité géométrique de type 'Point' (origine) n'a été trouvée dans ce fichier Cloud. Veuillez sélectionner une couche géocodée ou de points.");
+        alert("Aucune entité géométrique de type 'Point' ou propriétés 'latitude'/'longitude' n'a été trouvée dans ce fichier Cloud.");
         return;
       }
 
       window.resetTrajCloudBtn();
       
-      // Lancement immédiat de la file d'attente progressive de calcul d'itinéraire
+      // Lancement de la file d'attente progressive de calcul d'itinéraire
       processPointsInBulk(extractedPoints);
       
     } catch(e) { alert("Erreur de parsing géométrique ou de chargement du fichier."); }
