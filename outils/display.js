@@ -2,7 +2,7 @@
  * outils/display.js
  * Visualiseur cartographique multi-couches responsive propulsé par Deck.gl.
  * Supporte l'édition de symbologie (lignes, polygones et rayon des points), la gestion
- * dynamique des lignes de flux complexes (filtrage à 30%), l'arbre Cloud et l'export PDF.
+ * dynamique des lignes de flux complexes (filtrage ajustable), l'arbre Cloud et l'export PDF.
  */
 
 (function () {
@@ -89,13 +89,11 @@
       controller: true,
       glOptions: { preserveDrawingBuffer: true },
       
-      // Fermeture automatique de la popup d'infos si l'utilisateur déplace la carte
       onViewStateChange: () => {
         const popup = document.getElementById('deck-popup-info');
         if (popup) popup.style.display = 'none';
       },
 
-      // GESTIONNAIRE DE CLIC INTERACTIF POUR LES COUCHES GEOJSON
       onClick: (info) => {
         let popup = document.getElementById('deck-popup-info');
         if (!popup) {
@@ -130,11 +128,9 @@
     updateDeckLayers();
   }
 
-  // Moteur centralisé de rafraîchissement des couches Deck.gl
   function updateDeckLayers() {
     if (!mainMap) return;
 
-    // 1. Couche de base cartographique (Tuiles raster)
     const layers = [
       new deck.TileLayer({
         id: 'base-tiles',
@@ -150,25 +146,23 @@
       })
     ];
 
-    // 2. Génération dynamique des couches vectorielles et textuelles
     layerControlList.forEach(lyr => {
       if (!lyr.visible) return;
 
       const rgb = hexToRgb(lyr.color);
       const alpha = Math.round(lyr.opacity * 255);
 
-      // FILTRAGE DES ENTIÉS DE FLUX PASSÉ À 30% DU MAXIMUM DE LA COUCHE
+      // FILTRAGE DYNAMIQUE DES ENTIÉS DE FLUX VIA LE SEUIL DEFINI PAR LE SLIDER
       let featuresToRender = lyr.geojson.features || [];
       if (lyr.isFlux) {
         featuresToRender = featuresToRender.filter(f => {
           if (f.properties && typeof f.properties.weight !== 'undefined') {
-            return parseFloat(f.properties.weight) >= (0.3 * lyr.maxWeight);
+            return parseFloat(f.properties.weight) >= (lyr.minFluxFilter * lyr.maxWeight);
           }
           return true;
         });
       }
 
-      // Ajout de la couche vectorielle GeoJSON principal
       layers.push(new deck.GeoJsonLayer({
         id: `geojson-layer-${lyr.id}`,
         data: { type: "FeatureCollection", features: featuresToRender },
@@ -179,7 +173,6 @@
         getLineColor: [...rgb, alpha],
         getFillColor: [...rgb, Math.round(alpha * 0.3)],
         
-        // Gestion de l'épaisseur des lignes et polylignes
         getLineWidth: f => {
           if (lyr.isFlux && f.properties && typeof f.properties.weight !== 'undefined') {
             const w = parseFloat(f.properties.weight);
@@ -188,12 +181,10 @@
           return lyr.weight;
         },
 
-        // GESTION DU CURSEUR DYNAMIQUE APPLIQUÉ DIRECTEMENT SUR LE RAYON DU POINT (GROSSIR/RÉTRÉCIR)
         getPointRadius: f => lyr.weight * 3, 
         pointRadiusMinPixels: 2
       }));
 
-      // Ajout des étiquettes textuelles de flux
       if (lyr.isFlux) {
         const textData = [];
         let labelCounter = 0;
@@ -318,6 +309,7 @@
       weight: isFlux ? 3 : 2, 
       opacity: 0.85,
       isFlux: isFlux,
+      minFluxFilter: 0.3, // Valeur par défaut à 30%
       maxWeight: maxWeight,
       minWeight: minWeight,
       computeFluxWidth: computeFluxWidth,
@@ -354,19 +346,33 @@
           </div>
         </div>
         
-        <div id="style-panel-${lyr.id}" class="hidden border-t border-gray-100 pt-1.5 grid grid-cols-3 gap-1.5 text-[10px] text-gray-600 bg-gray-50/50 p-1 rounded">
-          <div>
-            <label class="block text-[8px] text-gray-400 font-medium uppercase">Couleur</label>
-            <input type="color" value="${lyr.color}" oninput="window.updateLayerSymbology('${lyr.id}', 'color', this.value)" class="w-full h-5 p-0 border-0 rounded cursor-pointer" />
+        <div id="style-panel-${lyr.id}" class="hidden border-t border-gray-100 pt-1.5 flex flex-col gap-2 text-[10px] text-gray-600 bg-gray-50/50 p-2 rounded">
+          <div class="grid grid-cols-3 gap-1.5">
+            <div>
+              <label class="block text-[8px] text-gray-400 font-medium uppercase mb-0.5">Couleur</label>
+              <input type="color" value="${lyr.color}" oninput="window.updateLayerSymbology('${lyr.id}', 'color', this.value)" class="w-full h-6 p-0 border-0 rounded cursor-pointer" />
+            </div>
+            <div>
+              <label class="block text-[8px] text-gray-400 font-medium uppercase mb-0.5">${lyr.isFlux ? 'Échelle (Lignes)' : 'Taille / Rayon'}</label>
+              <input type="number" min="0.1" max="1000" step="0.5" value="${lyr.weight}" oninput="window.updateLayerSymbology('${lyr.id}', 'weight', this.value)" class="w-full p-1 border border-gray-200 rounded text-center bg-white h-6 font-mono" />
+            </div>
+            <div>
+              <label class="block text-[8px] text-gray-400 font-medium uppercase mb-0.5">Opacité</label>
+              <input type="range" min="0.1" max="1" step="0.1" value="${lyr.opacity}" oninput="window.updateLayerSymbology('${lyr.id}', 'opacity', this.value)" class="w-full accent-gray-700 h-6" />
+            </div>
           </div>
-          <div>
-            <label class="block text-[8px] text-gray-400 font-medium uppercase">${lyr.isFlux ? 'Échelle' : 'Taille / Rayon'}</label>
-            <input type="range" min="0.5" max="10" step="0.5" value="${lyr.weight}" oninput="window.updateLayerSymbology('${lyr.id}', 'weight', this.value)" class="w-full accent-gray-700" />
-          </div>
-          <div>
-            <label class="block text-[8px] text-gray-400 font-medium uppercase">Opacité</label>
-            <input type="range" min="0.1" max="1" step="0.1" value="${lyr.opacity}" oninput="window.updateLayerSymbology('${lyr.id}', 'opacity', this.value)" class="w-full accent-gray-700" />
-          </div>
+
+          ${lyr.isFlux ? `
+            <div class="border-t border-gray-200/60 pt-1.5">
+              <div class="flex justify-between items-center text-[8px] text-gray-400 font-medium uppercase mb-0.5">
+                <span>Seuil de filtrage des flux</span>
+                <span id="filter-val-${lyr.id}" class="text-blue-600 font-mono font-bold">${Math.round(lyr.minFluxFilter * 100)}%</span>
+              </div>
+              <input type="range" min="0" max="1" step="0.05" value="${lyr.minFluxFilter}" 
+                oninput="window.updateLayerFluxFilter('${lyr.id}', this.value)" 
+                class="w-full accent-blue-600 cursor-pointer" />
+            </div>
+          ` : ''}
         </div>
       </div>
     `).join('');
@@ -382,13 +388,29 @@
     if (!lyr) return;
 
     if (property === 'color') lyr.color = value;
-    else if (property === 'weight') lyr.weight = parseFloat(value);
+    else if (property === 'weight') lyr.weight = parseFloat(value) || 1;
     else if (property === 'opacity') lyr.opacity = parseFloat(value);
 
     const dot = document.querySelector(`.legend-color-dot-${id}`);
     if (dot) {
       dot.style.backgroundColor = lyr.color;
       dot.style.opacity = lyr.opacity;
+    }
+
+    updateDeckLayers();
+  };
+
+  // Nouvelle méthode globale pour mettre à jour le filtre de flux à la volée
+  window.updateLayerFluxFilter = function (id, value) {
+    const lyr = layerControlList.find(l => l.id === id);
+    if (!lyr) return;
+
+    lyr.minFluxFilter = parseFloat(value);
+    
+    // Mise à jour de l'indicateur textuel %
+    const indicator = document.getElementById(`filter-val-${id}`);
+    if (indicator) {
+      indicator.innerText = `${Math.round(lyr.minFluxFilter * 100)}%`;
     }
 
     updateDeckLayers();
@@ -514,7 +536,7 @@
         pdf.setFont("helvetica", "normal"); pdf.setTextColor(55, 65, 81);
         
         let metaTxt = lyr.name;
-        if (lyr.isFlux) metaTxt += ` (Ligne de flux - Max Weight: ${lyr.maxWeight})`;
+        if (lyr.isFlux) metaTxt += ` (Ligne de flux - Filtrage: ${Math.round(lyr.minFluxFilter*100)}% - Max Weight: ${lyr.maxWeight})`;
         pdf.text(metaTxt, 22, currentY);
         currentY += 5.5;
       });
@@ -524,7 +546,7 @@
     btn.disabled = false; btn.textContent = originalText;
   }
 
-  // ── SYNCHRONISATEUR DE DOSSIERS CLOUD INTERACTIFS (LOGIQUE COPIE CONFORME ORGA.JS) ──
+  // ── SYNCHRONISATEUR DE DOSSIERS CLOUD INTERACTIFS ──
   window.fetchDisplayCloud = function () {
     const btn = document.getElementById('disp-cloud-btn');
     btn.disabled = true; btn.textContent = 'Téléchargement de l\'arbre...';
